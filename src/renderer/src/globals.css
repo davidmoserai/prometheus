@@ -1,0 +1,128 @@
+@import "tailwindcss";
+
+@theme {
+  /* Prometheus Brand Colors — inspired by the gift of fire */
+  --color-flame-50: #fff8f0;
+  --color-flame-100: #ffedd5;
+  --color-flame-200: #fed7aa;
+  --color-flame-300: #fdba74;
+  --color-flame-400: #fb923c;
+  --color-flame-500: #f97316;
+  --color-flame-600: #ea580c;
+  --color-flame-700: #c2410c;
+  --color-flame-800: #9a3412;
+  --color-flame-900: #7c2d12;
+
+  --color-ember-50: #fef3f2;
+  --color-ember-100: #ffe4e1;
+  --color-ember-200: #ffc9c2;
+  --color-ember-300: #ffa094;
+  --color-ember-400: #ff6b57;
+  --color-ember-500: #f43f2a;
+  --color-ember-600: #e11d0c;
+  --color-ember-700: #bd1508;
+  --color-ember-800: #9c160d;
+  --color-ember-900: #811812;
+
+  --color-forge-50: #f8fafc;
+  --color-forge-100: #f1f5f9;
+  --color-forge-200: #e2e8f0;
+  --color-forge-300: #94a3b8;
+  --color-forge-400: #64748b;
+  --color-forge-500: #475569;
+  --color-forge-600: #334155;
+  --color-forge-700: #1e293b;
+  --color-forge-800: #0f172a;
+  --color-forge-900: #09090b;
+  --color-forge-950: '#050507';
+
+  /* Semantic tokens */
+  --color-bg-primary: #09090b;
+  --color-bg-secondary: #0f0f12;
+  --color-bg-tertiary: #18181b;
+  --color-bg-elevated: #1c1c20;
+  --color-bg-surface: #27272a;
+
+  --color-border-subtle: #27272a;
+  --color-border-default: #3f3f46;
+  --color-border-bright: #52525b;
+
+  --color-text-primary: #fafafa;
+  --color-text-secondary: #a1a1aa;
+  --color-text-tertiary: #71717a;
+
+  --color-accent: #f97316;
+  --color-accent-hover: #fb923c;
+  --color-accent-subtle: rgba(249, 115, 22, 0.12);
+
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Inter', system-ui, sans-serif;
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-default);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-border-bright);
+}
+
+::selection {
+  background: rgba(249, 115, 22, 0.3);
+  color: white;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slide-in {
+  from { opacity: 0; transform: translateX(-8px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(249, 115, 22, 0.4); }
+  50% { box-shadow: 0 0 20px 4px rgba(249, 115, 22, 0.15); }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.3s ease-out;
+}
+
+.animate-slide-in {
+  animation: slide-in 0.2s ease-out;
+}
+
+.glow-pulse {
+  animation: pulse-glow 3s ease-in-out infinite;
+}
