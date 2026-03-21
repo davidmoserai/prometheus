@@ -59,10 +59,26 @@ interface ChatMessage {
   handoffFrom?: string
 }
 
+type AuthMethod = 'api_key' | 'oauth'
+
+interface OAuthState {
+  accessToken: string
+  refreshToken: string
+  expiresAt: string
+  scope: string
+}
+
 interface ProviderConfig {
   id: string
   name: string
+  authMethod: AuthMethod
   apiKey: string
+  oauth: OAuthState | null
+  oauthSupported: boolean
+  oauthClientId?: string
+  oauthAuthUrl?: string
+  oauthTokenUrl?: string
+  oauthScopes?: string[]
   baseUrl?: string
   models: string[]
   enabled: boolean
@@ -225,4 +241,4 @@ export const useAppStore = create<AppState>((set, get) => ({
   }
 }))
 
-export type { Employee, KnowledgeDocument, Conversation, ChatMessage, AppSettings, ProviderConfig, ToolAssignment, PermissionSet }
+export type { Employee, KnowledgeDocument, Conversation, ChatMessage, AppSettings, ProviderConfig, ToolAssignment, PermissionSet, AuthMethod, OAuthState }

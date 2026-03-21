@@ -64,10 +64,26 @@ export interface AppSettings {
   theme: 'dark' | 'light'
 }
 
+export type AuthMethod = 'api_key' | 'oauth'
+
+export interface OAuthState {
+  accessToken: string
+  refreshToken: string
+  expiresAt: string
+  scope: string
+}
+
 export interface ProviderConfig {
   id: string
   name: string
+  authMethod: AuthMethod
   apiKey: string
+  oauth: OAuthState | null
+  oauthSupported: boolean
+  oauthClientId?: string
+  oauthAuthUrl?: string
+  oauthTokenUrl?: string
+  oauthScopes?: string[]
   baseUrl?: string
   models: string[]
   enabled: boolean
@@ -77,35 +93,62 @@ export const DEFAULT_PROVIDERS: ProviderConfig[] = [
   {
     id: 'openai',
     name: 'OpenAI',
+    authMethod: 'api_key',
     apiKey: '',
+    oauth: null,
+    oauthSupported: true,
+    oauthClientId: '',
+    oauthAuthUrl: 'https://auth.openai.com/authorize',
+    oauthTokenUrl: 'https://auth.openai.com/token',
+    oauthScopes: ['openai.chat', 'openai.models.read'],
     models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'o1', 'o1-mini'],
     enabled: false
   },
   {
     id: 'anthropic',
     name: 'Anthropic',
+    authMethod: 'api_key',
     apiKey: '',
+    oauth: null,
+    oauthSupported: true,
+    oauthClientId: '',
+    oauthAuthUrl: 'https://console.anthropic.com/oauth/authorize',
+    oauthTokenUrl: 'https://console.anthropic.com/oauth/token',
+    oauthScopes: ['claude:read', 'claude:write'],
     models: ['claude-opus-4-20250514', 'claude-sonnet-4-20250514', 'claude-haiku-4-5-20251001'],
     enabled: false
   },
   {
     id: 'google',
     name: 'Google',
+    authMethod: 'api_key',
     apiKey: '',
+    oauth: null,
+    oauthSupported: true,
+    oauthClientId: '',
+    oauthAuthUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
+    oauthTokenUrl: 'https://oauth2.googleapis.com/token',
+    oauthScopes: ['https://www.googleapis.com/auth/generative-language'],
     models: ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash'],
     enabled: false
   },
   {
     id: 'mistral',
     name: 'Mistral',
+    authMethod: 'api_key',
     apiKey: '',
+    oauth: null,
+    oauthSupported: false,
     models: ['mistral-large-latest', 'mistral-medium-latest', 'mistral-small-latest'],
     enabled: false
   },
   {
     id: 'ollama',
     name: 'Ollama (Local)',
+    authMethod: 'api_key',
     apiKey: '',
+    oauth: null,
+    oauthSupported: false,
     baseUrl: 'http://localhost:11434',
     models: ['llama3', 'mistral', 'codellama', 'phi3'],
     enabled: false

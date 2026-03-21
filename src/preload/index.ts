@@ -31,6 +31,16 @@ const api = {
   settings: {
     get: () => ipcRenderer.invoke('settings:get'),
     update: (settings: unknown) => ipcRenderer.invoke('settings:update', settings)
+  },
+  oauth: {
+    start: (providerId: string) => ipcRenderer.invoke('oauth:start', providerId),
+    exchange: (providerId: string, code: string) => ipcRenderer.invoke('oauth:exchange', providerId, code),
+    disconnect: (providerId: string) => ipcRenderer.invoke('oauth:disconnect', providerId),
+    onCallback: (callback: (data: { providerId: string; code: string }) => void) => {
+      const handler = (_event: unknown, data: { providerId: string; code: string }) => callback(data)
+      ipcRenderer.on('oauth:callback', handler)
+      return () => ipcRenderer.removeListener('oauth:callback', handler)
+    }
   }
 }
 

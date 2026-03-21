@@ -8,6 +8,7 @@ import {
   Conversation,
   ChatMessage,
   AppSettings,
+  OAuthState,
   DEFAULT_SETTINGS
 } from './types'
 
@@ -183,5 +184,18 @@ export class EmployeeStore {
     this.data.settings = { ...this.data.settings, ...settings }
     this.save()
     return this.data.settings
+  }
+
+  updateProviderOAuth(providerId: string, oauth: OAuthState | null): void {
+    const provider = this.data.settings.providers.find(p => p.id === providerId)
+    if (provider) {
+      provider.oauth = oauth
+      if (oauth) {
+        provider.authMethod = 'oauth'
+      } else {
+        provider.authMethod = 'api_key'
+      }
+    }
+    this.save()
   }
 }
