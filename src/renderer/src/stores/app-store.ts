@@ -394,15 +394,19 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   sendMessage: async (conversationId, message) => {
     await window.api.chat.send(conversationId, message)
-    const conv = await window.api.conversations.get(conversationId)
-    if (conv) {
-      set((state) => ({
-        conversations: state.conversations.map(c =>
-          c.id === conversationId ? conv : c
-        )
-      }))
-    }
-    get().clearStreamingContent(conversationId)
+    // Quietly sync the conversation from store (adds the real message IDs)
+    // Use a slight delay to avoid flicker with the streaming content
+    setTimeout(async () => {
+      const conv = await window.api.conversations.get(conversationId)
+      if (conv) {
+        set((state) => ({
+          conversations: state.conversations.map(c =>
+            c.id === conversationId ? conv : c
+          )
+        }))
+      }
+      get().clearStreamingContent(conversationId)
+    }, 100)
   },
 
   // Tasks

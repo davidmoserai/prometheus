@@ -213,7 +213,7 @@ export function ChatPage() {
               {activeConversation.messages.map((msg) => (
                 <MessageBubble key={msg.id} message={msg} employeeName={selectedEmployee?.name} employeeAvatar={selectedEmployee?.avatar} />
               ))}
-              {currentStreaming && !activeConversation.messages.find(m => m.content === currentStreaming) && (
+              {currentStreaming && currentStreaming.length > 0 && !activeConversation.messages.find(m => m.role === 'assistant' && m.content === currentStreaming) && (
                 <div className="flex animate-fade-in" style={{ gap: '14px' }}>
                   <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-bg-elevated text-sm shrink-0">
                     {selectedEmployee?.avatar}
