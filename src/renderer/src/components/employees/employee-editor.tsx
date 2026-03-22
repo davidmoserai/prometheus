@@ -102,7 +102,7 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
     { id: 'basic' as const, label: 'Basic Info' },
     { id: 'tools' as const, label: 'Tools' },
     { id: 'knowledge' as const, label: 'Knowledge' },
-    { id: 'permissions' as const, label: 'Permissions' }
+    { id: 'permissions' as const, label: 'Access' }
   ]
 
   return (
@@ -399,47 +399,11 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
           )}
 
           {activeTab === 'permissions' && (
-            <div className="flex flex-col" style={{ gap: '16px' }}>
-              <Card>
-                <CardHeader>
-                  <CardTitle>Permissions</CardTitle>
-                  <CardDescription>
-                    Control what this employee is allowed to do autonomously.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex flex-col" style={{ gap: '4px' }}>
-                    {([
-                      { key: 'canBrowseWeb' as const, label: 'Browse the web', desc: 'Search and visit websites' },
-                      { key: 'canReadFiles' as const, label: 'Read files', desc: 'Access local file system for reading' },
-                      { key: 'canWriteFiles' as const, label: 'Write files', desc: 'Create and modify local files' },
-                      { key: 'canExecuteCode' as const, label: 'Execute code', desc: 'Run code in a sandboxed environment' },
-                      { key: 'autoApproveAll' as const, label: 'Auto-approve all actions', desc: 'Skip confirmation for all tool uses (use with caution)' }
-                    ]).map(({ key, label, desc }) => (
-                      <div key={key} className="flex items-center justify-between rounded-xl hover:bg-white/[0.05] transition-all duration-300" style={{ padding: '12px' }}>
-                        <div>
-                          <p className="text-[13px] font-medium text-text-primary">{label}</p>
-                          <p className="text-[12px] text-text-tertiary">{desc}</p>
-                        </div>
-                        <Switch
-                          checked={permissions[key]}
-                          onCheckedChange={(checked) =>
-                            setPermissions({ ...permissions, [key]: checked })
-                          }
-                        />
-                      </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Contact Access */}
-              <ContactAccessEditor
-                value={permissions.contactAccess}
-                onChange={(contactAccess) => setPermissions({ ...permissions, contactAccess })}
-                currentEmployeeId={employee?.id}
-              />
-            </div>
+            <ContactAccessEditor
+              value={permissions.contactAccess}
+              onChange={(contactAccess) => setPermissions({ ...permissions, contactAccess })}
+              currentEmployeeId={employee?.id}
+            />
           )}
         </div>
       </div>
