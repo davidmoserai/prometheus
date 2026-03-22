@@ -216,17 +216,23 @@ export const DEFAULT_PROVIDERS: ProviderConfig[] = [
     apiKey: '',
     baseUrl: 'https://ollama.com/api',
     models: [
+      'deepseek-v3.2',
       'deepseek-v3.1:671b',
       'qwen3-coder:480b',
-      'qwen3.5:122b',
+      'qwen3.5:397b',
+      'qwen3-next:80b',
       'gpt-oss:120b',
       'gpt-oss:20b',
       'glm-5',
-      'nemotron-3-super:120b',
-      'devstral:123b',
+      'glm-4.7',
+      'nemotron-3-super',
+      'devstral-2:123b',
       'cogito-2.1:671b',
       'minimax-m2.7',
-      'kimi-k2.5'
+      'minimax-m2.5',
+      'kimi-k2.5',
+      'kimi-k2-thinking',
+      'mistral-large-3:675b'
     ],
     enabled: false
   },

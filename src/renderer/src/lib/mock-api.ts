@@ -223,7 +223,7 @@ const defaultProviders = [
   { id: 'anthropic', name: 'Anthropic', apiKey: '', models: ['claude-opus-4-20250514', 'claude-sonnet-4-20250514', 'claude-haiku-4-5-20251001'], enabled: true },
   { id: 'google', name: 'Google', apiKey: '', models: ['gemini-2.5-pro', 'gemini-2.5-flash'], enabled: false },
   { id: 'mistral', name: 'Mistral', apiKey: '', models: ['mistral-large-latest', 'mistral-small-latest'], enabled: false },
-  { id: 'ollama-cloud', name: 'Ollama Cloud', apiKey: '', baseUrl: 'https://ollama.com/api', models: ['deepseek-v3.1:671b', 'qwen3-coder:480b', 'qwen3.5:122b', 'gpt-oss:120b', 'gpt-oss:20b', 'glm-5', 'nemotron-3-super:120b', 'devstral:123b'], enabled: false },
+  { id: 'ollama-cloud', name: 'Ollama Cloud', apiKey: '', baseUrl: 'https://ollama.com/api', models: ['deepseek-v3.2', 'deepseek-v3.1:671b', 'qwen3-coder:480b', 'qwen3.5:397b', 'qwen3-next:80b', 'gpt-oss:120b', 'gpt-oss:20b', 'glm-5', 'glm-4.7', 'nemotron-3-super', 'devstral-2:123b', 'cogito-2.1:671b', 'minimax-m2.7', 'kimi-k2.5', 'mistral-large-3:675b'], enabled: false },
   { id: 'ollama', name: 'Ollama (Local)', apiKey: '', baseUrl: 'http://localhost:11434', models: ['llama3', 'mistral', 'codellama'], enabled: false }
 ]
 
