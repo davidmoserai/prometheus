@@ -42,7 +42,12 @@ const api = {
     get: (id: string) => ipcRenderer.invoke('tasks:get', id),
     create: (data: unknown) => ipcRenderer.invoke('tasks:create', data),
     update: (id: string, data: unknown) => ipcRenderer.invoke('tasks:update', id, data),
-    delete: (id: string) => ipcRenderer.invoke('tasks:delete', id)
+    delete: (id: string) => ipcRenderer.invoke('tasks:delete', id),
+    onUpdate: (callback: (task: unknown) => void) => {
+      const handler = (_event: unknown, task: unknown) => callback(task)
+      ipcRenderer.on('task:updated', handler)
+      return () => ipcRenderer.removeListener('task:updated', handler)
+    }
   },
   chat: {
     send: (conversationId: string, message: string) =>

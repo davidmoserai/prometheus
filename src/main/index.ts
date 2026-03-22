@@ -100,6 +100,11 @@ app.whenReady().then(() => {
   store = new EmployeeStore()
   agentManager = new AgentManager(store)
 
+  // Push task updates to frontend in real-time
+  agentManager.setTaskUpdateCallback((task) => {
+    mainWindow?.webContents.send('task:updated', task)
+  })
+
   registerIpcHandlers()
   createWindow()
 

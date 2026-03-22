@@ -8,9 +8,15 @@ import { ChatMessage, Employee, ProviderConfig, Task } from './types'
  */
 export class AgentManager {
   private store: EmployeeStore
+  private onTaskUpdate?: (task: Task) => void
 
   constructor(store: EmployeeStore) {
     this.store = store
+  }
+
+  /** Set callback for notifying frontend when tasks are created/updated */
+  setTaskUpdateCallback(cb: (task: Task) => void) {
+    this.onTaskUpdate = cb
   }
 
   async sendMessage(
@@ -164,7 +170,7 @@ export class AgentManager {
   }
 
   /**
-   * Handle a delegate_task tool call by creating a Task in the store.
+   * Handle a delegate_task tool call: create task, auto-execute with target agent, return result.
    */
   private handleDelegateTask(
     fromEmployee: Employee,
@@ -186,9 +192,70 @@ export class AgentManager {
       status: 'pending'
     })
 
-    const message = `Task delegated to **${toName}** (${toEmployee?.role || 'unknown role'}).\n\n**Objective:** ${args.objective}\n**Priority:** ${args.priority}\n**Deadline:** ${args.deadline || 'Not specified'}`
+    this.onTaskUpdate?.(task)
+
+    // Auto-execute: send brief to target agent in background
+    this.executeTask(task).catch(err => {
+      console.error('Task auto-execution failed:', err)
+      this.store.updateTask(task.id, {
+        status: 'escalated',
+        response: `Auto-execution failed: ${err instanceof Error ? err.message : 'Unknown error'}`
+      })
+      const updated = this.store.getTask(task.id)
+      if (updated) this.onTaskUpdate?.(updated)
+    })
+
+    const message = `Task delegated to **${toName}** (${toEmployee?.role || 'unknown role'}). They're working on it now.\n\n**Objective:** ${args.objective}\n**Priority:** ${args.priority}\n**Deadline:** ${args.deadline || 'Not specified'}`
 
     return { task, message }
+  }
+
+  /**
+   * Auto-execute a task: send the Agent Brief to the target employee and capture their response.
+   */
+  private async executeTask(task: Task): Promise<void> {
+    const toEmployee = this.store.getEmployee(task.toEmployeeId)
+    if (!toEmployee) throw new Error('Target employee not found')
+
+    const fromEmployee = this.store.getEmployee(task.fromEmployeeId)
+    const fromName = fromEmployee?.name || 'Unknown'
+
+    const settings = this.store.getSettings()
+    const provider = settings.providers.find(p => p.id === toEmployee.provider)
+    if (!provider) throw new Error(`Provider ${toEmployee.provider} not configured`)
+    if (!provider.apiKey && provider.id !== 'ollama') throw new Error(`No API key for ${provider.name}`)
+
+    // Update status to in_progress
+    this.store.updateTask(task.id, { status: 'in_progress' })
+    const inProgress = this.store.getTask(task.id)
+    if (inProgress) this.onTaskUpdate?.(inProgress)
+
+    // Build the brief as a user message to the target agent
+    const brief = `AGENT BRIEF\nTo: ${toEmployee.name} (${toEmployee.role})\nFrom: ${fromName}\nPriority: ${task.priority}\nDeadline: ${task.deadline || 'Not specified'}\n\nObjective:\n${task.objective}\n\nContext:\n${task.context}\n\nDeliverable:\n${task.deliverable}\n\nAcceptance Criteria:\n${task.acceptanceCriteria}\n\nEscalate to founder if:\n${task.escalateIf}`
+
+    // Build system prompt for target employee
+    const systemPrompt = this.buildSystemPrompt(toEmployee)
+
+    // Send to LLM (no tools for task execution — just get the response)
+    const messages = [{ role: 'user', content: brief }]
+
+    const responseText = await this.callProvider(
+      provider,
+      toEmployee,
+      systemPrompt,
+      messages,
+      () => {}, // no streaming for background tasks
+      undefined  // no tools
+    )
+
+    // Save response and mark completed
+    this.store.updateTask(task.id, {
+      status: 'completed',
+      response: responseText
+    })
+
+    const completed = this.store.getTask(task.id)
+    if (completed) this.onTaskUpdate?.(completed)
   }
 
   /**

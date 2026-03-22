@@ -36,6 +36,15 @@ export default function App() {
     return unsub
   }, [])
 
+  // Set up task update listener (real-time updates from background task execution)
+  useEffect(() => {
+    if (!window.api?.tasks?.onUpdate) return
+    const unsub = window.api.tasks.onUpdate(() => {
+      useAppStore.getState().loadTasks()
+    })
+    return unsub
+  }, [])
+
   const renderView = () => {
     switch (activeView) {
       case 'dashboard':
