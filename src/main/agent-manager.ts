@@ -1,224 +1,346 @@
 import { readFileSync, writeFileSync } from 'fs'
+import { Agent } from '@mastra/core/agent'
+import { createTool } from '@mastra/core/tools'
+import { z } from 'zod'
 import { EmployeeStore } from './store'
 import { ChatMessage, Employee, ProviderConfig, Task } from './types'
-import { z, ZodObject, ZodRawShape } from 'zod'
+
+// ============================================================
+// Mastra model string/object builders
+// ============================================================
+
+type MastraModel = string | { id: string; url: string; apiKey?: string; headers?: Record<string, string> }
 
 /**
- * Unified tool definition — define once, generate both OpenAI and Anthropic formats.
+ * Map our provider + model config to a Mastra-compatible model reference.
+ * Inline objects are used so we never pollute process.env with API keys.
  */
-interface ToolDef {
-  name: string
-  description: string
-  schema: ZodObject<ZodRawShape>
-  required: string[]
-}
-
-/**
- * Convert a Zod schema to JSON Schema properties for API tool definitions.
- */
-function zodToJsonProperties(schema: ZodObject<ZodRawShape>): {
-  properties: Record<string, unknown>
-} {
-  const shape = schema.shape
-  const properties: Record<string, unknown> = {}
-
-  for (const [key, value] of Object.entries(shape)) {
-    const zodType = value as z.ZodTypeAny
-    const desc = zodType._def?.description || ''
-
-    if (zodType instanceof z.ZodString) {
-      properties[key] = { type: 'string', ...(desc ? { description: desc } : {}) }
-    } else if (zodType instanceof z.ZodNumber) {
-      properties[key] = { type: 'number', ...(desc ? { description: desc } : {}) }
-    } else if (zodType instanceof z.ZodBoolean) {
-      properties[key] = { type: 'boolean', ...(desc ? { description: desc } : {}) }
-    } else if (zodType instanceof z.ZodEnum) {
-      properties[key] = { type: 'string', enum: zodType._def.values, ...(desc ? { description: desc } : {}) }
-    } else if (zodType instanceof z.ZodArray) {
-      properties[key] = { type: 'array', items: { type: 'string' }, ...(desc ? { description: desc } : {}) }
-    } else if (zodType instanceof z.ZodOptional) {
-      // Unwrap optional and recurse
-      const inner = zodType._def.innerType as z.ZodTypeAny
-      if (inner instanceof z.ZodString) {
-        properties[key] = { type: 'string', ...(desc || inner._def?.description ? { description: desc || inner._def?.description } : {}) }
-      } else if (inner instanceof z.ZodArray) {
-        properties[key] = { type: 'array', items: { type: 'string' }, ...(desc || inner._def?.description ? { description: desc || inner._def?.description } : {}) }
-      } else {
-        properties[key] = { type: 'string', ...(desc ? { description: desc } : {}) }
+function buildModelRef(provider: ProviderConfig, model: string): MastraModel {
+  switch (provider.id) {
+    case 'vercel-ai-gateway':
+      // Model strings already have format "anthropic/claude-sonnet-4.6"
+      // Vercel gateway uses "vercel/{provider}/{model}"
+      return {
+        id: `vercel/${model}`,
+        url: provider.baseUrl || 'https://ai-gateway.vercel.sh/v1',
+        apiKey: provider.apiKey
       }
-    } else {
-      properties[key] = { type: 'string', ...(desc ? { description: desc } : {}) }
-    }
-  }
 
-  return { properties }
-}
-
-/**
- * Convert a ToolDef to OpenAI function calling format.
- */
-function toOpenAITool(def: ToolDef): Record<string, unknown> {
-  const { properties } = zodToJsonProperties(def.schema)
-  return {
-    type: 'function',
-    function: {
-      name: def.name,
-      description: def.description,
-      parameters: {
-        type: 'object',
-        properties,
-        required: def.required
+    case 'openai':
+      return {
+        id: `openai/${model}`,
+        url: 'https://api.openai.com/v1',
+        apiKey: provider.apiKey
       }
-    }
+
+    case 'anthropic':
+      return {
+        id: `anthropic/${model}`,
+        url: 'https://api.anthropic.com/v1',
+        apiKey: provider.apiKey
+      }
+
+    case 'google':
+      return {
+        id: `google/${model}`,
+        url: 'https://generativelanguage.googleapis.com/v1beta/openai',
+        apiKey: provider.apiKey,
+        headers: { 'x-goog-api-key': provider.apiKey }
+      }
+
+    case 'mistral':
+      return {
+        id: `mistral/${model}`,
+        url: 'https://api.mistral.ai/v1',
+        apiKey: provider.apiKey
+      }
+
+    case 'ollama':
+      return {
+        id: `ollama/${model}`,
+        url: (provider.baseUrl || 'http://localhost:11434') + '/v1',
+        apiKey: 'not-needed'
+      }
+
+    case 'ollama-cloud':
+      return {
+        id: `ollama-cloud/${model}`,
+        url: (provider.baseUrl || 'https://ollama.com/api').replace(/\/api$/, '') + '/v1',
+        apiKey: provider.apiKey
+      }
+
+    default:
+      return {
+        id: model,
+        url: provider.baseUrl || 'https://api.openai.com/v1',
+        apiKey: provider.apiKey
+      }
   }
 }
 
 /**
- * Convert a ToolDef to Anthropic tool format.
+ * Build provider-specific options for caching and zero data retention.
  */
-function toAnthropicTool(def: ToolDef): Record<string, unknown> {
-  const { properties } = zodToJsonProperties(def.schema)
-  return {
-    name: def.name,
-    description: def.description,
-    input_schema: {
-      type: 'object',
-      properties,
-      required: def.required
-    }
+function buildProviderOptions(provider: ProviderConfig): Record<string, unknown> | undefined {
+  switch (provider.id) {
+    case 'vercel-ai-gateway':
+      return {
+        gateway: { caching: 'auto', zeroDataRetention: true }
+      }
+    case 'anthropic':
+      return {
+        anthropic: { cacheControl: { type: 'ephemeral' } }
+      }
+    default:
+      return undefined
   }
 }
 
 // ============================================================
-// Tool Schema Definitions (defined once with Zod)
+// Tool builders — created dynamically per request via closure
 // ============================================================
 
-const delegateTaskSchema = z.object({
-  to_employee_id: z.string().describe('ID of the employee to delegate to'),
-  priority: z.enum(['high', 'medium', 'low']),
-  deadline: z.string().describe('When the task should be completed'),
-  objective: z.string().describe('One sentence: what outcome is required'),
-  context: z.string().describe('Minimum context the agent needs'),
-  deliverable: z.string().describe('Exact output format expected'),
-  acceptance_criteria: z.string().describe('What makes this done correctly'),
-  escalate_if: z.string().describe("Condition requiring founder's input")
-})
+function buildMastraTools(
+  store: EmployeeStore,
+  employee: Employee,
+  conversationId: string | undefined,
+  contactable: Employee[],
+  onDelegateTask: (fromEmployee: Employee, args: Record<string, string>) => { task: Task; message: string },
+  onFileWritten?: (data: { conversationId: string; path: string; content: string }) => void
+): Record<string, ReturnType<typeof createTool>> {
+  const tools: Record<string, ReturnType<typeof createTool>> = {}
+  const enabledToolIds = new Set(
+    employee.tools.filter(t => t.enabled && t.source === 'builtin').map(t => t.id)
+  )
 
-const saveMemorySchema = z.object({
-  content: z.string().describe('Your full updated memory (replaces previous). Include all facts you want to remember.')
-})
+  // Delegation tool (only if employee can contact others)
+  if (contactable.length > 0) {
+    tools.delegate_task = createTool({
+      id: 'delegate_task',
+      description: 'Delegate a task to another employee. Use this when work should be handled by a team member with the right expertise.',
+      inputSchema: z.object({
+        to_employee_id: z.string().describe('ID of the employee to delegate to'),
+        priority: z.enum(['high', 'medium', 'low']),
+        deadline: z.string().describe('When the task should be completed'),
+        objective: z.string().describe('One sentence: what outcome is required'),
+        context: z.string().describe('Minimum context the agent needs'),
+        deliverable: z.string().describe('Exact output format expected'),
+        acceptance_criteria: z.string().describe('What makes this done correctly'),
+        escalate_if: z.string().describe("Condition requiring founder's input")
+      }),
+      execute: async (input) => {
+        const { message } = onDelegateTask(employee, input as Record<string, string>)
+        return { result: message }
+      }
+    })
+  }
 
-const createKnowledgeDocSchema = z.object({
-  title: z.string().describe('Title for the knowledge document'),
-  content: z.string().describe('The document content'),
-  tags: z.array(z.string()).optional().describe('Tags for categorization')
-})
-
-const updateKnowledgeDocSchema = z.object({
-  doc_id: z.string().describe('ID of the document to update'),
-  content: z.string().describe('New content for the document')
-})
-
-const webSearchSchema = z.object({
-  query: z.string().describe('The search query')
-})
-
-const webBrowseSchema = z.object({
-  url: z.string().describe('The URL to visit')
-})
-
-const readFileSchema = z.object({
-  path: z.string().describe('Path to the file')
-})
-
-const writeFileSchema = z.object({
-  path: z.string().describe('Path to the file'),
-  content: z.string().describe('Content to write')
-})
-
-const executeCodeSchema = z.object({
-  language: z.string().describe('Programming language (e.g. python, javascript)'),
-  code: z.string().describe('The code to execute')
-})
-
-const createScheduledTaskSchema = z.object({
-  name: z.string().describe('Short name for the task'),
-  employee_id: z.string().describe('ID of the employee who should execute this task (use your own ID to schedule for yourself)'),
-  brief: z.string().describe('The task description/instructions to execute each time'),
-  schedule: z.enum(['hourly', 'daily', 'weekly']).describe('How often to run'),
-  schedule_time: z.string().optional().describe('When to run, e.g. "08:00" for daily or "monday 09:00" for weekly')
-})
-
-// Build ToolDef objects
-const TOOL_DEFS: Record<string, ToolDef> = {
-  delegate_task: {
-    name: 'delegate_task',
-    description: 'Delegate a task to another employee. Use this when work should be handled by a team member with the right expertise.',
-    schema: delegateTaskSchema,
-    required: ['to_employee_id', 'priority', 'objective', 'context', 'deliverable', 'acceptance_criteria', 'escalate_if']
-  },
-  save_memory: {
-    name: 'save_memory',
+  // Memory tools — always available
+  tools.save_memory = createTool({
+    id: 'save_memory',
     description: 'Save important facts, decisions, and preferences to your persistent memory. Your memory persists across conversations. Pass the full updated memory content — it replaces your previous memory entirely.',
-    schema: saveMemorySchema,
-    required: ['content']
-  },
-  create_knowledge_doc: {
-    name: 'create_knowledge_doc',
+    inputSchema: z.object({
+      content: z.string().describe('Your full updated memory (replaces previous). Include all facts you want to remember.')
+    }),
+    execute: async (input) => {
+      store.updateEmployeeMemory(employee.id, input.content)
+      return { result: 'Memory saved successfully. Your updated memory will be included in future conversations.' }
+    }
+  })
+
+  tools.create_knowledge_doc = createTool({
+    id: 'create_knowledge_doc',
     description: 'Create a new knowledge document that you and other employees can reference. Use this for important information that should be shared.',
-    schema: createKnowledgeDocSchema,
-    required: ['title', 'content']
-  },
-  update_knowledge_doc: {
-    name: 'update_knowledge_doc',
+    inputSchema: z.object({
+      title: z.string().describe('Title for the knowledge document'),
+      content: z.string().describe('The document content'),
+      tags: z.array(z.string()).optional().describe('Tags for categorization')
+    }),
+    execute: async (input) => {
+      const doc = store.createKnowledge({
+        title: input.title,
+        content: input.content,
+        tags: input.tags || [],
+        lastVerifiedAt: null,
+        docType: 'living',
+        reviewIntervalDays: null
+      })
+
+      // Auto-assign to this employee
+      const emp = store.getEmployee(employee.id)
+      if (emp) {
+        store.updateEmployee(employee.id, {
+          knowledgeIds: [...emp.knowledgeIds, doc.id]
+        })
+      }
+
+      return { result: `Knowledge document "${input.title}" created (ID: ${doc.id}) and assigned to you. Other employees can also be assigned this document.` }
+    }
+  })
+
+  tools.update_knowledge_doc = createTool({
+    id: 'update_knowledge_doc',
     description: 'Update the content of an existing knowledge document by its ID.',
-    schema: updateKnowledgeDocSchema,
-    required: ['doc_id', 'content']
-  },
-  web_search: {
-    name: 'web_search',
-    description: 'Search the web for information',
-    schema: webSearchSchema,
-    required: ['query']
-  },
-  web_browse: {
-    name: 'web_browse',
-    description: 'Visit a URL and read its content',
-    schema: webBrowseSchema,
-    required: ['url']
-  },
-  read_file: {
-    name: 'read_file',
-    description: 'Read a file from the local filesystem',
-    schema: readFileSchema,
-    required: ['path']
-  },
-  write_file: {
-    name: 'write_file',
-    description: 'Write content to a file',
-    schema: writeFileSchema,
-    required: ['path', 'content']
-  },
-  execute_code: {
-    name: 'execute_code',
-    description: 'Execute code in a sandboxed environment',
-    schema: executeCodeSchema,
-    required: ['language', 'code']
-  },
-  create_scheduled_task: {
-    name: 'create_scheduled_task',
-    description: 'Create a recurring scheduled task that runs automatically. Use this to set up daily reports, weekly check-ins, or any recurring work.',
-    schema: createScheduledTaskSchema,
-    required: ['name', 'employee_id', 'brief', 'schedule']
+    inputSchema: z.object({
+      doc_id: z.string().describe('ID of the document to update'),
+      content: z.string().describe('New content for the document')
+    }),
+    execute: async (input) => {
+      const updated = store.updateKnowledge(input.doc_id, { content: input.content })
+      if (!updated) return { result: `Document with ID "${input.doc_id}" not found.` }
+      return { result: `Document "${updated.title}" updated successfully.` }
+    }
+  })
+
+  // Builtin tools based on employee configuration
+  if (enabledToolIds.has('web-search')) {
+    tools.web_search = createTool({
+      id: 'web_search',
+      description: 'Search the web for information',
+      inputSchema: z.object({
+        query: z.string().describe('The search query')
+      }),
+      execute: async (input) => {
+        try {
+          const response = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(input.query)}`, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Prometheus/1.0)' }
+          })
+          const html = await response.text()
+          const text = html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
+          return { result: text.slice(0, 5000) || `Web search executed for: ${input.query}` }
+        } catch {
+          return { result: `Web search executed for: ${input.query}. (Could not fetch results — check network connection.)` }
+        }
+      }
+    })
   }
+
+  if (enabledToolIds.has('web-browse')) {
+    tools.web_browse = createTool({
+      id: 'web_browse',
+      description: 'Visit a URL and read its content',
+      inputSchema: z.object({
+        url: z.string().describe('The URL to visit')
+      }),
+      execute: async (input) => {
+        try {
+          const response = await fetch(input.url, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Prometheus/1.0)' }
+          })
+          const html = await response.text()
+          const text = html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
+          return { result: text.slice(0, 5000) }
+        } catch (err) {
+          return { result: `Failed to browse ${input.url}: ${err instanceof Error ? err.message : 'Unknown error'}` }
+        }
+      }
+    })
+  }
+
+  if (enabledToolIds.has('file-read')) {
+    tools.read_file = createTool({
+      id: 'read_file',
+      description: 'Read a file from the local filesystem',
+      inputSchema: z.object({
+        path: z.string().describe('Path to the file')
+      }),
+      execute: async (input) => {
+        try {
+          const content = readFileSync(input.path, 'utf-8')
+          return { result: content.slice(0, 10000) }
+        } catch (err) {
+          return { result: `Failed to read file ${input.path}: ${err instanceof Error ? err.message : 'Unknown error'}` }
+        }
+      }
+    })
+  }
+
+  if (enabledToolIds.has('file-write')) {
+    tools.write_file = createTool({
+      id: 'write_file',
+      description: 'Write content to a file',
+      inputSchema: z.object({
+        path: z.string().describe('Path to the file'),
+        content: z.string().describe('Content to write')
+      }),
+      execute: async (input) => {
+        try {
+          writeFileSync(input.path, input.content)
+          if (conversationId) {
+            onFileWritten?.({ conversationId, path: input.path, content: input.content })
+          }
+          return { result: `File written successfully to ${input.path} (${input.content.length} bytes)` }
+        } catch (err) {
+          return { result: `Failed to write file ${input.path}: ${err instanceof Error ? err.message : 'Unknown error'}` }
+        }
+      }
+    })
+  }
+
+  if (enabledToolIds.has('code-execute')) {
+    tools.execute_code = createTool({
+      id: 'execute_code',
+      description: 'Execute code in a sandboxed environment',
+      inputSchema: z.object({
+        language: z.string().describe('Programming language (e.g. python, javascript)'),
+        code: z.string().describe('The code to execute')
+      }),
+      execute: async (input) => {
+        return { result: `Code execution is not yet available in sandbox. Language: ${input.language}, Code length: ${input.code?.length || 0} chars.` }
+      }
+    })
+  }
+
+  // Scheduled tasks — always available
+  tools.create_scheduled_task = createTool({
+    id: 'create_scheduled_task',
+    description: 'Create a recurring scheduled task that runs automatically. Use this to set up daily reports, weekly check-ins, or any recurring work.',
+    inputSchema: z.object({
+      name: z.string().describe('Short name for the task'),
+      employee_id: z.string().describe('ID of the employee who should execute this task (use your own ID to schedule for yourself)'),
+      brief: z.string().describe('The task description/instructions to execute each time'),
+      schedule: z.enum(['hourly', 'daily', 'weekly']).describe('How often to run'),
+      schedule_time: z.string().optional().describe('When to run, e.g. "08:00" for daily or "monday 09:00" for weekly')
+    }),
+    execute: async (input) => {
+      try {
+        const schedule = input.schedule
+        const now = new Date()
+        let nextRunAt: Date
+
+        if (schedule === 'hourly') {
+          nextRunAt = new Date(now.getTime() + 60 * 60 * 1000)
+        } else if (schedule === 'weekly') {
+          nextRunAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000)
+        } else {
+          nextRunAt = new Date(now.getTime() + 24 * 60 * 60 * 1000)
+        }
+
+        const recurringTask = store.createRecurringTask({
+          employeeId: input.employee_id,
+          name: input.name,
+          brief: input.brief,
+          schedule,
+          scheduleTime: input.schedule_time || undefined,
+          enabled: true,
+          lastRunAt: null,
+          nextRunAt: nextRunAt.toISOString()
+        })
+
+        return { result: `Scheduled task "${recurringTask.name}" created. Runs ${schedule}${input.schedule_time ? ` at ${input.schedule_time}` : ''}. Next run: ${nextRunAt.toLocaleString()}` }
+      } catch (err) {
+        return { result: `Failed to create scheduled task: ${err instanceof Error ? err.message : 'Unknown error'}` }
+      }
+    }
+  })
+
+  return tools
 }
 
-/**
- * AgentManager handles communication between the renderer and LLM providers.
- * Uses unified Zod-based tool definitions with provider-specific API routing.
- * Supports OpenAI, Anthropic, Google, Mistral, Ollama, Ollama Cloud,
- * and Vercel AI Gateway.
- */
+// ============================================================
+// AgentManager — Mastra-powered agent orchestration
+// ============================================================
+
 export class AgentManager {
   private store: EmployeeStore
   private onTaskUpdate?: (task: Task) => void
@@ -259,20 +381,14 @@ export class AgentManager {
 
     if (!provider?.apiKey && provider?.id !== 'ollama') {
       const errorMsg = `No API key configured for ${provider?.name || employee.provider}. Go to Settings to add your API key.`
-      const msg = this.store.addMessage(conversationId, {
-        role: 'assistant',
-        content: errorMsg
-      })
+      const msg = this.store.addMessage(conversationId, { role: 'assistant', content: errorMsg })
       onStream(errorMsg)
       return msg
     }
 
     if (!provider) {
       const errorMsg = `Provider "${employee.provider}" not found. Check your settings.`
-      const msg = this.store.addMessage(conversationId, {
-        role: 'assistant',
-        content: errorMsg
-      })
+      const msg = this.store.addMessage(conversationId, { role: 'assistant', content: errorMsg })
       onStream(errorMsg)
       return msg
     }
@@ -286,38 +402,76 @@ export class AgentManager {
       content: m.content
     }))
 
-    // Build unified tools list
+    // Build tools via closure
     const contactable = this.getContactableEmployees(employee)
-    const isAnthropic = provider.id === 'anthropic'
-    const toolDefs = this.buildToolDefs(employee, contactable.length > 0)
-    const tools = toolDefs.map(def => isAnthropic ? toAnthropicTool(def) : toOpenAITool(def))
-    const toolsParam = tools.length > 0 ? tools : undefined
+    const tools = buildMastraTools(
+      this.store,
+      employee,
+      conversationId,
+      contactable,
+      (fromEmp, args) => this.handleDelegateTask(fromEmp, args),
+      this.onFileWritten
+    )
 
     try {
-      const responseText = await this.callProvider(
+      const responseText = await this.runAgent(
         provider,
         employee,
         systemPrompt,
         messages,
         onStream,
-        toolsParam,
-        conversationId
+        Object.keys(tools).length > 0 ? tools : undefined
       )
 
-      const msg = this.store.addMessage(conversationId, {
-        role: 'assistant',
-        content: responseText
-      })
+      const msg = this.store.addMessage(conversationId, { role: 'assistant', content: responseText })
       return msg
     } catch (error) {
       const errorMsg = `Failed to get response: ${error instanceof Error ? error.message : 'Unknown error'}. Check your API key and model settings.`
-      const msg = this.store.addMessage(conversationId, {
-        role: 'assistant',
-        content: errorMsg
-      })
+      const msg = this.store.addMessage(conversationId, { role: 'assistant', content: errorMsg })
       onStream(errorMsg)
       return msg
     }
+  }
+
+  /**
+   * Create a Mastra Agent and run it with streaming, returning the final text.
+   * Handles tool calling automatically via Mastra's built-in loop.
+   */
+  private async runAgent(
+    provider: ProviderConfig,
+    employee: Employee,
+    systemPrompt: string,
+    messages: { role: 'user' | 'assistant' | 'system'; content: string }[],
+    onStream: (chunk: string) => void,
+    tools?: Record<string, ReturnType<typeof createTool>>
+  ): Promise<string> {
+    const modelRef = buildModelRef(provider, employee.model)
+    const providerOptions = buildProviderOptions(provider)
+
+    // Create a per-request agent with the right model, instructions, and tools
+    const agent = new Agent({
+      id: `employee-${employee.id}`,
+      name: employee.name,
+      instructions: systemPrompt,
+      model: modelRef,
+      tools: tools || {},
+      maxSteps: 10
+    })
+
+    // Stream the response and accumulate text for the onStream callback
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const streamFn = agent.stream.bind(agent) as (messages: any, options?: any) => Promise<any>
+    const result = providerOptions
+      ? await streamFn(messages, { providerOptions })
+      : await streamFn(messages)
+
+    let accumulated = ''
+    for await (const chunk of result.textStream) {
+      accumulated += chunk
+      onStream(accumulated)
+    }
+
+    return accumulated
   }
 
   /**
@@ -337,37 +491,6 @@ export class AgentManager {
       if (e.departmentId && contactAccess.allowedDepartmentIds.includes(e.departmentId)) return true
       return false
     })
-  }
-
-  /**
-   * Build the list of ToolDef objects for an employee based on their configuration.
-   * Unified — no more dual OpenAI/Anthropic definitions.
-   */
-  private buildToolDefs(employee: Employee, canDelegate: boolean): ToolDef[] {
-    const defs: ToolDef[] = []
-    const enabledToolIds = new Set(employee.tools.filter(t => t.enabled && t.source === 'builtin').map(t => t.id))
-
-    // Delegation tool (only if employee can contact others)
-    if (canDelegate) {
-      defs.push(TOOL_DEFS.delegate_task)
-    }
-
-    // Memory tools — always available
-    defs.push(TOOL_DEFS.save_memory)
-    defs.push(TOOL_DEFS.create_knowledge_doc)
-    defs.push(TOOL_DEFS.update_knowledge_doc)
-
-    // Builtin tools based on employee configuration
-    if (enabledToolIds.has('web-search')) defs.push(TOOL_DEFS.web_search)
-    if (enabledToolIds.has('web-browse')) defs.push(TOOL_DEFS.web_browse)
-    if (enabledToolIds.has('file-read')) defs.push(TOOL_DEFS.read_file)
-    if (enabledToolIds.has('file-write')) defs.push(TOOL_DEFS.write_file)
-    if (enabledToolIds.has('code-execute')) defs.push(TOOL_DEFS.execute_code)
-
-    // Scheduled tasks — always available
-    defs.push(TOOL_DEFS.create_scheduled_task)
-
-    return defs
   }
 
   /**
@@ -412,146 +535,6 @@ export class AgentManager {
   }
 
   /**
-   * Execute a tool and return the result string.
-   * Handles all tools: delegation, memory, knowledge, builtin, and scheduled tasks.
-   */
-  private async executeTool(
-    toolName: string,
-    args: Record<string, string>,
-    employee: Employee,
-    conversationId?: string
-  ): Promise<string> {
-    switch (toolName) {
-      case 'delegate_task': {
-        const { message } = this.handleDelegateTask(employee, args)
-        return message
-      }
-      case 'save_memory': {
-        const content = args.content || ''
-        this.store.updateEmployeeMemory(employee.id, content)
-        return 'Memory saved successfully. Your updated memory will be included in future conversations.'
-      }
-      case 'create_knowledge_doc': {
-        const title = args.title || 'Untitled Document'
-        const content = args.content || ''
-        let tags: string[] = []
-        try {
-          tags = args.tags ? JSON.parse(args.tags) : []
-        } catch {
-          tags = args.tags ? [args.tags] : []
-        }
-
-        const doc = this.store.createKnowledge({
-          title,
-          content,
-          tags,
-          lastVerifiedAt: null,
-          docType: 'living',
-          reviewIntervalDays: null
-        })
-
-        // Auto-assign to this employee
-        const emp = this.store.getEmployee(employee.id)
-        if (emp) {
-          this.store.updateEmployee(employee.id, {
-            knowledgeIds: [...emp.knowledgeIds, doc.id]
-          })
-        }
-
-        return `Knowledge document "${title}" created (ID: ${doc.id}) and assigned to you. Other employees can also be assigned this document.`
-      }
-      case 'update_knowledge_doc': {
-        const docId = args.doc_id || ''
-        const content = args.content || ''
-        const updated = this.store.updateKnowledge(docId, { content })
-        if (!updated) return `Document with ID "${docId}" not found.`
-        return `Document "${updated.title}" updated successfully.`
-      }
-      case 'web_search': {
-        try {
-          const query = args.query || ''
-          const response = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
-            headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Prometheus/1.0)' }
-          })
-          const html = await response.text()
-          const text = html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
-          return text.slice(0, 5000) || `Web search executed for: ${query}`
-        } catch {
-          return `Web search executed for: ${args.query}. (Could not fetch results — check network connection.)`
-        }
-      }
-      case 'web_browse': {
-        try {
-          const url = args.url || ''
-          const response = await fetch(url, {
-            headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Prometheus/1.0)' }
-          })
-          const html = await response.text()
-          const text = html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
-          return text.slice(0, 5000)
-        } catch (err) {
-          return `Failed to browse ${args.url}: ${err instanceof Error ? err.message : 'Unknown error'}`
-        }
-      }
-      case 'read_file': {
-        try {
-          const content = readFileSync(args.path, 'utf-8')
-          return content.slice(0, 10000)
-        } catch (err) {
-          return `Failed to read file ${args.path}: ${err instanceof Error ? err.message : 'Unknown error'}`
-        }
-      }
-      case 'write_file': {
-        try {
-          writeFileSync(args.path, args.content)
-          if (conversationId) {
-            this.onFileWritten?.({ conversationId, path: args.path, content: args.content })
-          }
-          return `File written successfully to ${args.path} (${args.content.length} bytes)`
-        } catch (err) {
-          return `Failed to write file ${args.path}: ${err instanceof Error ? err.message : 'Unknown error'}`
-        }
-      }
-      case 'execute_code': {
-        return `Code execution is not yet available in sandbox. Language: ${args.language}, Code length: ${args.code?.length || 0} chars.`
-      }
-      case 'create_scheduled_task': {
-        try {
-          const schedule = (args.schedule || 'daily') as 'hourly' | 'daily' | 'weekly'
-          const now = new Date()
-          let nextRunAt: Date
-
-          if (schedule === 'hourly') {
-            nextRunAt = new Date(now.getTime() + 60 * 60 * 1000)
-          } else if (schedule === 'weekly') {
-            nextRunAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000)
-          } else {
-            nextRunAt = new Date(now.getTime() + 24 * 60 * 60 * 1000)
-          }
-
-          const recurringTask = this.store.createRecurringTask({
-            employeeId: args.employee_id || '',
-            name: args.name || 'Scheduled Task',
-            brief: args.brief || '',
-            schedule,
-            scheduleTime: args.schedule_time || undefined,
-            enabled: true,
-            lastRunAt: null,
-            nextRunAt: nextRunAt.toISOString()
-          })
-
-          this.onTaskUpdate?.(recurringTask as unknown as Task)
-          return `Scheduled task "${recurringTask.name}" created. Runs ${schedule}${args.schedule_time ? ` at ${args.schedule_time}` : ''}. Next run: ${nextRunAt.toLocaleString()}`
-        } catch (err) {
-          return `Failed to create scheduled task: ${err instanceof Error ? err.message : 'Unknown error'}`
-        }
-      }
-      default:
-        return `Unknown tool: ${toolName}`
-    }
-  }
-
-  /**
    * Estimate token count for a piece of text using a simple heuristic.
    */
   countTokens(text: string): number {
@@ -593,8 +576,8 @@ export class AgentManager {
       { role: 'user', content: `Summarize this conversation concisely, preserving key facts, decisions, and context:\n\n${summaryContent}` }
     ]
 
-    // Call the LLM to get a summary
-    const summaryText = await this.callProvider(
+    // Use Mastra agent for the summary (no tools needed)
+    const summaryText = await this.runAgent(
       provider,
       employee,
       'You are a helpful assistant that creates concise conversation summaries.',
@@ -643,7 +626,7 @@ export class AgentManager {
     // Send to LLM (no tools for task execution — just get the response)
     const messages = [{ role: 'user', content: brief }]
 
-    const responseText = await this.callProvider(
+    const responseText = await this.runAgent(
       provider,
       toEmployee,
       systemPrompt,
@@ -713,607 +696,5 @@ export class AgentManager {
     prompt += '\nYou can use create_scheduled_task to set up recurring automated tasks for yourself or any team member.'
 
     return prompt
-  }
-
-  /**
-   * Route API call to the correct provider format.
-   */
-  private async callProvider(
-    provider: ProviderConfig,
-    employee: Employee,
-    systemPrompt: string,
-    messages: { role: string; content: string }[],
-    onStream: (chunk: string) => void,
-    tools?: Record<string, unknown>[],
-    conversationId?: string
-  ): Promise<string> {
-    const model = employee.model
-    switch (provider.id) {
-      case 'anthropic':
-        return this.callAnthropic(provider, employee, systemPrompt, messages, onStream, tools, conversationId)
-      case 'ollama':
-        return this.callOllama(provider, model, systemPrompt, messages, onStream)
-      case 'ollama-cloud':
-        return this.callOllamaCloud(provider, model, systemPrompt, messages, onStream)
-      case 'vercel-ai-gateway':
-      case 'openai':
-      case 'google':
-      case 'mistral':
-      default:
-        return this.callOpenAICompatible(provider, employee, systemPrompt, messages, onStream, tools, conversationId)
-    }
-  }
-
-  /**
-   * Get the base URL for a provider.
-   */
-  private getBaseUrl(provider: ProviderConfig): string {
-    if (provider.baseUrl) return provider.baseUrl
-
-    switch (provider.id) {
-      case 'openai':
-        return 'https://api.openai.com/v1'
-      case 'mistral':
-        return 'https://api.mistral.ai/v1'
-      case 'google':
-        return 'https://generativelanguage.googleapis.com/v1beta/openai'
-      case 'vercel-ai-gateway':
-        return 'https://ai-gateway.vercel.sh/v1'
-      default:
-        return 'https://api.openai.com/v1'
-    }
-  }
-
-  /**
-   * OpenAI Chat Completions format — works for OpenAI, Vercel AI Gateway,
-   * Mistral, and Google (via their OpenAI-compatible endpoint).
-   * Supports tool calling for all tools.
-   */
-  private async callOpenAICompatible(
-    provider: ProviderConfig,
-    employee: Employee,
-    systemPrompt: string,
-    messages: { role: string; content: string }[],
-    onStream: (chunk: string) => void,
-    tools?: Record<string, unknown>[],
-    conversationId?: string
-  ): Promise<string> {
-    const baseUrl = this.getBaseUrl(provider)
-    const url = `${baseUrl}/chat/completions`
-    const model = employee.model
-
-    const apiMessages: Record<string, unknown>[] = [
-      ...(systemPrompt ? [{ role: 'system', content: systemPrompt }] : []),
-      ...messages
-    ]
-
-    // Build request body
-    const body: Record<string, unknown> = {
-      model,
-      messages: apiMessages,
-      stream: true
-    }
-
-    // Add tools if available
-    if (tools && tools.length > 0) {
-      body.tools = tools
-    }
-
-    // Vercel AI Gateway: enable caching + native zero data retention
-    if (provider.id === 'vercel-ai-gateway') {
-      body.providerOptions = {
-        gateway: {
-          caching: 'auto',
-          zeroDataRetention: true
-        }
-      }
-    }
-
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${provider.apiKey}`
-    }
-
-    // Google uses API key differently
-    if (provider.id === 'google') {
-      delete headers['Authorization']
-      headers['x-goog-api-key'] = provider.apiKey
-    }
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body)
-    })
-
-    if (!response.ok) {
-      const errorBody = await response.text()
-      throw new Error(`${provider.name} API error ${response.status}: ${errorBody}`)
-    }
-
-    const result = await this.parseSSEStream(response, onStream)
-
-    // Check if the non-streaming fallback captured a tool call
-    if (tools && tools.length > 0 && !result) {
-      return this.callOpenAIWithToolHandling(provider, employee, systemPrompt, apiMessages, tools, onStream, conversationId)
-    }
-
-    return result
-  }
-
-  /**
-   * Non-streaming OpenAI call that handles tool use responses.
-   * Supports all tools with follow-up requests.
-   */
-  private async callOpenAIWithToolHandling(
-    provider: ProviderConfig,
-    employee: Employee,
-    systemPrompt: string,
-    apiMessages: Record<string, unknown>[],
-    tools: Record<string, unknown>[],
-    onStream: (chunk: string) => void,
-    conversationId?: string
-  ): Promise<string> {
-    const baseUrl = this.getBaseUrl(provider)
-    const url = `${baseUrl}/chat/completions`
-
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${provider.apiKey}`
-    }
-
-    if (provider.id === 'google') {
-      delete headers['Authorization']
-      headers['x-goog-api-key'] = provider.apiKey
-    }
-
-    // Loop to handle multiple tool call rounds
-    let currentMessages = [...apiMessages]
-    let maxRounds = 5
-
-    while (maxRounds-- > 0) {
-      const body: Record<string, unknown> = {
-        model: employee.model,
-        messages: currentMessages,
-        stream: false,
-        tools
-      }
-
-      const response = await fetch(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(body)
-      })
-
-      if (!response.ok) {
-        const errorBody = await response.text()
-        throw new Error(`${provider.name} API error ${response.status}: ${errorBody}`)
-      }
-
-      const json = await response.json() as Record<string, unknown>
-      const choice = (json.choices as Record<string, unknown>[])?.[0]
-      const message = choice?.message as Record<string, unknown> | undefined
-      const toolCalls = message?.tool_calls as Record<string, unknown>[] | undefined
-      const _finishReason = choice?.finish_reason as string
-
-      if (toolCalls && toolCalls.length > 0) {
-        // Add assistant message with tool calls to history
-        currentMessages.push(message as Record<string, unknown>)
-
-        // Process each tool call
-        for (const toolCall of toolCalls) {
-          const fn = toolCall.function as { name: string; arguments: string }
-          const args = JSON.parse(fn.arguments) as Record<string, string>
-          const toolResult = await this.executeTool(fn.name, args, employee, conversationId)
-
-          // Add tool result to messages
-          currentMessages.push({
-            role: 'tool',
-            tool_call_id: (toolCall as Record<string, unknown>).id,
-            content: toolResult
-          })
-        }
-
-        // Continue loop to get the next response
-        continue
-      }
-
-      // No tool calls — return text response
-      const text = (message?.content as string) || ''
-      onStream(text)
-      return text
-    }
-
-    // Safety fallback if max rounds exceeded
-    const fallback = 'Reached maximum tool call rounds.'
-    onStream(fallback)
-    return fallback
-  }
-
-  /**
-   * Anthropic Messages API — uses their native format with caching support.
-   * Supports tool use for all tools.
-   */
-  private async callAnthropic(
-    provider: ProviderConfig,
-    employee: Employee,
-    systemPrompt: string,
-    messages: { role: string; content: string }[],
-    onStream: (chunk: string) => void,
-    tools?: Record<string, unknown>[],
-    conversationId?: string
-  ): Promise<string> {
-    const baseUrl = provider.baseUrl || 'https://api.anthropic.com'
-    const url = `${baseUrl}/v1/messages`
-    const model = employee.model
-
-    // Filter out system messages from the messages array (system is separate in Anthropic)
-    const apiMessages = messages
-      .filter(m => m.role !== 'system')
-      .map(m => ({ role: m.role, content: m.content }))
-
-    // Build system with cache_control for prompt caching
-    const system = systemPrompt
-      ? [{ type: 'text' as const, text: systemPrompt, cache_control: { type: 'ephemeral' as const } }]
-      : undefined
-
-    const body: Record<string, unknown> = {
-      model,
-      max_tokens: 8192,
-      stream: true,
-      system,
-      messages: apiMessages
-    }
-
-    // Add tools if available
-    if (tools && tools.length > 0) {
-      body.tools = tools
-    }
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': provider.apiKey,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify(body)
-    })
-
-    if (!response.ok) {
-      const errorBody = await response.text()
-      throw new Error(`Anthropic API error ${response.status}: ${errorBody}`)
-    }
-
-    const result = await this.parseAnthropicSSEStream(response, onStream)
-
-    // If streaming didn't capture tool use, try non-streaming for tool handling
-    if (tools && tools.length > 0 && !result) {
-      return this.callAnthropicWithToolHandling(provider, employee, systemPrompt, apiMessages, tools, onStream, conversationId)
-    }
-
-    return result
-  }
-
-  /**
-   * Non-streaming Anthropic call that handles tool use responses.
-   * Supports all tools with follow-up requests.
-   */
-  private async callAnthropicWithToolHandling(
-    provider: ProviderConfig,
-    employee: Employee,
-    systemPrompt: string,
-    apiMessages: { role: string; content: string }[],
-    tools: Record<string, unknown>[],
-    onStream: (chunk: string) => void,
-    conversationId?: string
-  ): Promise<string> {
-    const baseUrl = provider.baseUrl || 'https://api.anthropic.com'
-    const url = `${baseUrl}/v1/messages`
-
-    const system = systemPrompt
-      ? [{ type: 'text' as const, text: systemPrompt, cache_control: { type: 'ephemeral' as const } }]
-      : undefined
-
-    const requestHeaders = {
-      'Content-Type': 'application/json',
-      'x-api-key': provider.apiKey,
-      'anthropic-version': '2023-06-01'
-    }
-
-    // Messages can have mixed content types for Anthropic tool flow
-    let currentMessages: Record<string, unknown>[] = apiMessages.map(m => ({ role: m.role, content: m.content }))
-    let maxRounds = 5
-    let accumulatedText = ''
-
-    while (maxRounds-- > 0) {
-      const body: Record<string, unknown> = {
-        model: employee.model,
-        max_tokens: 8192,
-        stream: false,
-        system,
-        messages: currentMessages,
-        tools
-      }
-
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: requestHeaders,
-        body: JSON.stringify(body)
-      })
-
-      if (!response.ok) {
-        const errorBody = await response.text()
-        throw new Error(`Anthropic API error ${response.status}: ${errorBody}`)
-      }
-
-      const json = await response.json() as Record<string, unknown>
-      const content = json.content as { type: string; id?: string; text?: string; name?: string; input?: Record<string, string> }[]
-      const stopReason = json.stop_reason as string
-
-      // Collect text and tool use blocks
-      const toolUseBlocks: { id: string; name: string; input: Record<string, string> }[] = []
-      for (const block of content) {
-        if (block.type === 'text' && block.text) {
-          accumulatedText += block.text
-        }
-        if (block.type === 'tool_use' && block.name && block.id) {
-          toolUseBlocks.push({ id: block.id, name: block.name, input: block.input || {} })
-        }
-      }
-
-      // If no tool use, we're done
-      if (stopReason !== 'tool_use' || toolUseBlocks.length === 0) {
-        break
-      }
-
-      // Add assistant response with tool_use to messages
-      currentMessages.push({ role: 'assistant', content })
-
-      // Process tool calls and build tool_result
-      const toolResults: Record<string, unknown>[] = []
-      for (const toolUse of toolUseBlocks) {
-        const toolResult = await this.executeTool(toolUse.name, toolUse.input, employee, conversationId)
-
-        toolResults.push({
-          type: 'tool_result',
-          tool_use_id: toolUse.id,
-          content: toolResult
-        })
-      }
-
-      // Add user message with tool results
-      currentMessages.push({ role: 'user', content: toolResults })
-    }
-
-    onStream(accumulatedText)
-    return accumulatedText
-  }
-
-  /**
-   * Ollama local API — /api/chat endpoint.
-   */
-  private async callOllama(
-    provider: ProviderConfig,
-    model: string,
-    systemPrompt: string,
-    messages: { role: string; content: string }[],
-    onStream: (chunk: string) => void
-  ): Promise<string> {
-    const baseUrl = provider.baseUrl || 'http://localhost:11434'
-    const url = `${baseUrl}/api/chat`
-
-    const apiMessages = [
-      ...(systemPrompt ? [{ role: 'system', content: systemPrompt }] : []),
-      ...messages
-    ]
-
-    // keep_alive keeps model + KV cache in memory for faster subsequent requests
-    const body = {
-      model,
-      messages: apiMessages,
-      stream: true,
-      keep_alive: '30m'
-    }
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    })
-
-    if (!response.ok) {
-      const errorBody = await response.text()
-      throw new Error(`Ollama API error ${response.status}: ${errorBody}`)
-    }
-
-    return this.parseOllamaStream(response, onStream)
-  }
-
-  /**
-   * Ollama Cloud API — same format as Ollama but with Bearer auth.
-   */
-  private async callOllamaCloud(
-    provider: ProviderConfig,
-    model: string,
-    systemPrompt: string,
-    messages: { role: string; content: string }[],
-    onStream: (chunk: string) => void
-  ): Promise<string> {
-    const baseUrl = provider.baseUrl || 'https://ollama.com/api'
-    const url = `${baseUrl}/chat`
-
-    const apiMessages = [
-      ...(systemPrompt ? [{ role: 'system', content: systemPrompt }] : []),
-      ...messages
-    ]
-
-    const body = {
-      model,
-      messages: apiMessages,
-      stream: true,
-      keep_alive: '30m'
-    }
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${provider.apiKey}`
-      },
-      body: JSON.stringify(body)
-    })
-
-    if (!response.ok) {
-      const errorBody = await response.text()
-      throw new Error(`Ollama Cloud API error ${response.status}: ${errorBody}`)
-    }
-
-    return this.parseOllamaStream(response, onStream)
-  }
-
-  /**
-   * Parse OpenAI-compatible SSE stream (data: {...} lines).
-   */
-  private async parseSSEStream(
-    response: Response,
-    onStream: (chunk: string) => void
-  ): Promise<string> {
-    const reader = response.body?.getReader()
-    if (!reader) throw new Error('No response body')
-
-    const decoder = new TextDecoder()
-    let accumulated = ''
-    let buffer = ''
-
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-
-      buffer += decoder.decode(value, { stream: true })
-
-      // Process complete lines
-      const lines = buffer.split('\n')
-      // Keep the last potentially incomplete line in the buffer
-      buffer = lines.pop() || ''
-
-      for (const line of lines) {
-        const trimmed = line.trim()
-        if (!trimmed || trimmed.startsWith(':')) continue
-        if (trimmed === 'data: [DONE]') continue
-
-        if (trimmed.startsWith('data: ')) {
-          try {
-            const json = JSON.parse(trimmed.slice(6))
-            const delta = json.choices?.[0]?.delta?.content
-            if (delta) {
-              accumulated += delta
-              onStream(accumulated)
-            }
-          } catch {
-            // Skip malformed JSON chunks
-          }
-        }
-      }
-    }
-
-    return accumulated
-  }
-
-  /**
-   * Parse Anthropic SSE stream (event: content_block_delta, etc.).
-   */
-  private async parseAnthropicSSEStream(
-    response: Response,
-    onStream: (chunk: string) => void
-  ): Promise<string> {
-    const reader = response.body?.getReader()
-    if (!reader) throw new Error('No response body')
-
-    const decoder = new TextDecoder()
-    let accumulated = ''
-    let buffer = ''
-
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-
-      buffer += decoder.decode(value, { stream: true })
-
-      const lines = buffer.split('\n')
-      buffer = lines.pop() || ''
-
-      for (const line of lines) {
-        const trimmed = line.trim()
-        if (!trimmed || trimmed.startsWith('event:')) continue
-
-        if (trimmed.startsWith('data: ')) {
-          try {
-            const json = JSON.parse(trimmed.slice(6))
-
-            // Handle content_block_delta events
-            if (json.type === 'content_block_delta' && json.delta?.text) {
-              accumulated += json.delta.text
-              onStream(accumulated)
-            }
-
-            // Handle error events
-            if (json.type === 'error') {
-              throw new Error(json.error?.message || 'Anthropic stream error')
-            }
-          } catch (e) {
-            if (e instanceof Error && e.message.includes('stream error')) throw e
-            // Skip malformed JSON
-          }
-        }
-      }
-    }
-
-    return accumulated
-  }
-
-  /**
-   * Parse Ollama NDJSON stream (one JSON object per line).
-   */
-  private async parseOllamaStream(
-    response: Response,
-    onStream: (chunk: string) => void
-  ): Promise<string> {
-    const reader = response.body?.getReader()
-    if (!reader) throw new Error('No response body')
-
-    const decoder = new TextDecoder()
-    let accumulated = ''
-    let buffer = ''
-
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-
-      buffer += decoder.decode(value, { stream: true })
-
-      const lines = buffer.split('\n')
-      buffer = lines.pop() || ''
-
-      for (const line of lines) {
-        const trimmed = line.trim()
-        if (!trimmed) continue
-
-        try {
-          const json = JSON.parse(trimmed)
-          if (json.message?.content) {
-            accumulated += json.message.content
-            onStream(accumulated)
-          }
-          if (json.error) {
-            throw new Error(json.error)
-          }
-        } catch (e) {
-          if (e instanceof Error && e.message !== 'Unexpected end of JSON input') throw e
-        }
-      }
-    }
-
-    return accumulated
   }
 }
