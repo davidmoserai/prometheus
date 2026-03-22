@@ -105,7 +105,7 @@ function buildMastraTools(
   employee: Employee,
   conversationId: string | undefined,
   contactable: Employee[],
-  onDelegateTask: (fromEmployee: Employee, args: Record<string, string>) => { task: Task; message: string },
+  onDelegateTask: (fromEmployee: Employee, args: Record<string, string>, conversationId?: string) => { task: Task; message: string },
   onMessageEmployee?: (fromEmployee: Employee, toEmployeeId: string, message: string) => Promise<string>,
   onToolCall?: (data: { tool: string; summary: string; detail?: string }) => void,
   onFileWritten?: (data: { conversationId: string; path: string; content: string }) => void
@@ -133,7 +133,7 @@ function buildMastraTools(
       execute: async (input) => {
         const toEmp = store.getEmployee(input.to_employee_id)
         onToolCall?.({ tool: 'delegate_task', summary: `Delegated task to ${toEmp?.name || 'employee'}: ${input.objective}` })
-        const { message } = onDelegateTask(employee, input as Record<string, string>)
+        const { message } = onDelegateTask(employee, input as Record<string, string>, conversationId)
         return { result: message }
       }
     })
@@ -443,7 +443,7 @@ export class AgentManager {
       employee,
       conversationId,
       contactable,
-      (fromEmp, args) => this.handleDelegateTask(fromEmp, args),
+      (fromEmp, args, convId) => this.handleDelegateTask(fromEmp, args, convId),
       (fromEmp, toId, msg) => this.executeAgentMessage(fromEmp, toId, msg),
       toolCallCb,
       this.onFileWritten
@@ -534,7 +534,8 @@ export class AgentManager {
    */
   private handleDelegateTask(
     fromEmployee: Employee,
-    args: Record<string, string>
+    args: Record<string, string>,
+    conversationId?: string
   ): { task: Task; message: string } {
     const toEmployee = this.store.getEmployee(args.to_employee_id)
     const toName = toEmployee?.name || 'Unknown'
@@ -551,6 +552,36 @@ export class AgentManager {
       escalateIf: args.escalate_if,
       status: 'pending'
     })
+
+    // Attach file paths from conversation to the task context
+    if (conversationId) {
+      const conv = this.store.getConversation(conversationId)
+      if (conv) {
+        const attachedFiles: string[] = []
+        for (const msg of conv.messages) {
+          // Check for inline attachment markers
+          const matches = msg.content.match(/\[Attached: .+?\] \(path: (.+?)\)/g) || []
+          for (const match of matches) {
+            const pathMatch = match.match(/\(path: (.+?)\)/)
+            if (pathMatch) attachedFiles.push(pathMatch[1])
+          }
+          // Check for structured attachments on the message
+          if (msg.attachments) {
+            for (const att of msg.attachments) {
+              if (!attachedFiles.includes(att.path)) {
+                attachedFiles.push(att.path)
+              }
+            }
+          }
+        }
+        if (attachedFiles.length > 0) {
+          const fileList = attachedFiles.map(f => `- ${f}`).join('\n')
+          this.store.updateTask(task.id, {
+            context: task.context + `\n\nAttached files from the conversation:\n${fileList}`
+          })
+        }
+      }
+    }
 
     this.onTaskUpdate?.(task)
 
