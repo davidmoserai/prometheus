@@ -40,12 +40,23 @@ Tailwind spacing utilities (`p-7`, `mb-5`, `gap-6`, etc.) do NOT render at corre
 - Supports both OpenAI-compatible (function calling) and Anthropic (tool_use) formats
 - Tasks page at `components/tasks/tasks-page.tsx` — grouped by status (escalated/pending/in_progress/completed)
 
-## Builtin Tool Execution (Function Calling)
-- Employee tools (`web-search`, `web-browse`, `file-read`, `file-write`, `code-execute`) are wired as real LLM function calling tools
-- Tools are built for both OpenAI (`buildBuiltinToolsOpenAI`) and Anthropic (`buildBuiltinToolsAnthropic`) formats
-- `executeBuiltinTool()` in agent-manager handles execution (web fetch, filesystem read/write, etc.)
+## Tool System (Unified Zod Definitions)
+- Tools defined once with Zod schemas in `TOOL_DEFS` record, converted to OpenAI/Anthropic format automatically
+- **Memory tools** (always available): `save_memory`, `create_knowledge_doc`, `update_knowledge_doc`
+- **Builtin tools** (per employee config): `web_search`, `web_browse`, `read_file`, `write_file`, `execute_code`
+- **Delegation**: `delegate_task` (when employee has contactable employees)
+- **Scheduling**: `create_scheduled_task` (always available)
+- `executeTool()` in agent-manager handles all tool execution
 - Tool call flow supports multi-round tool use (up to 5 rounds)
 - `write_file` emits `chat:fileWritten` event to show download cards in chat UI
+
+## Agent Memory System
+- `Employee.memory: string` — persistent memory field, survives across conversations
+- Agents use `save_memory` tool to save important facts/decisions/preferences
+- Memory injected into system prompt under "# Your Memory" section
+- Employee editor shows memory (read-only) with "Clear Memory" button
+- Agents can create/update knowledge docs via `create_knowledge_doc` / `update_knowledge_doc` tools
+- Knowledge doc IDs shown in system prompt so agents can reference them
 
 ## Token Counting + Conversation Compression
 - `countTokens()` uses `Math.ceil(text.length / 4)` heuristic
@@ -72,7 +83,7 @@ Tailwind spacing utilities (`p-7`, `mb-5`, `gap-6`, etc.) do NOT render at corre
 - `src/main/index.ts` — Electron entry, IPC handlers (store/agentManager init in `app.whenReady()`)
 - `src/main/store.ts` — EmployeeStore class, JSON persistence, company-scoped data
 - `src/main/types.ts` — All type definitions (Company, Employee, Task, etc.) + DEFAULT_PROVIDERS
-- `src/main/agent-manager.ts` — LLM agent manager (OpenAI-compatible, Anthropic, Ollama; streaming; prompt caching; delegate_task + builtin tools; token counting; compression)
+- `src/main/agent-manager.ts` — LLM agent manager (unified Zod tool defs; memory/knowledge tools; OpenAI-compatible, Anthropic, Ollama routing; streaming; prompt caching; token counting; compression)
 - `src/main/scheduler.ts` — Recurring task scheduler (60s interval check)
 - `src/preload/index.ts` — Secure IPC bridge
 - `src/renderer/src/lib/mock-api.ts` — Mock API for web preview mode

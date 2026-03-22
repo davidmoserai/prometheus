@@ -1,11 +1,223 @@
 import { readFileSync, writeFileSync } from 'fs'
 import { EmployeeStore } from './store'
 import { ChatMessage, Employee, ProviderConfig, Task } from './types'
+import { z, ZodObject, ZodRawShape } from 'zod'
+
+/**
+ * Unified tool definition — define once, generate both OpenAI and Anthropic formats.
+ */
+interface ToolDef {
+  name: string
+  description: string
+  schema: ZodObject<ZodRawShape>
+  required: string[]
+}
+
+/**
+ * Convert a Zod schema to JSON Schema properties for API tool definitions.
+ */
+function zodToJsonProperties(schema: ZodObject<ZodRawShape>): {
+  properties: Record<string, unknown>
+} {
+  const shape = schema.shape
+  const properties: Record<string, unknown> = {}
+
+  for (const [key, value] of Object.entries(shape)) {
+    const zodType = value as z.ZodTypeAny
+    const desc = zodType._def?.description || ''
+
+    if (zodType instanceof z.ZodString) {
+      properties[key] = { type: 'string', ...(desc ? { description: desc } : {}) }
+    } else if (zodType instanceof z.ZodNumber) {
+      properties[key] = { type: 'number', ...(desc ? { description: desc } : {}) }
+    } else if (zodType instanceof z.ZodBoolean) {
+      properties[key] = { type: 'boolean', ...(desc ? { description: desc } : {}) }
+    } else if (zodType instanceof z.ZodEnum) {
+      properties[key] = { type: 'string', enum: zodType._def.values, ...(desc ? { description: desc } : {}) }
+    } else if (zodType instanceof z.ZodArray) {
+      properties[key] = { type: 'array', items: { type: 'string' }, ...(desc ? { description: desc } : {}) }
+    } else if (zodType instanceof z.ZodOptional) {
+      // Unwrap optional and recurse
+      const inner = zodType._def.innerType as z.ZodTypeAny
+      if (inner instanceof z.ZodString) {
+        properties[key] = { type: 'string', ...(desc || inner._def?.description ? { description: desc || inner._def?.description } : {}) }
+      } else if (inner instanceof z.ZodArray) {
+        properties[key] = { type: 'array', items: { type: 'string' }, ...(desc || inner._def?.description ? { description: desc || inner._def?.description } : {}) }
+      } else {
+        properties[key] = { type: 'string', ...(desc ? { description: desc } : {}) }
+      }
+    } else {
+      properties[key] = { type: 'string', ...(desc ? { description: desc } : {}) }
+    }
+  }
+
+  return { properties }
+}
+
+/**
+ * Convert a ToolDef to OpenAI function calling format.
+ */
+function toOpenAITool(def: ToolDef): Record<string, unknown> {
+  const { properties } = zodToJsonProperties(def.schema)
+  return {
+    type: 'function',
+    function: {
+      name: def.name,
+      description: def.description,
+      parameters: {
+        type: 'object',
+        properties,
+        required: def.required
+      }
+    }
+  }
+}
+
+/**
+ * Convert a ToolDef to Anthropic tool format.
+ */
+function toAnthropicTool(def: ToolDef): Record<string, unknown> {
+  const { properties } = zodToJsonProperties(def.schema)
+  return {
+    name: def.name,
+    description: def.description,
+    input_schema: {
+      type: 'object',
+      properties,
+      required: def.required
+    }
+  }
+}
+
+// ============================================================
+// Tool Schema Definitions (defined once with Zod)
+// ============================================================
+
+const delegateTaskSchema = z.object({
+  to_employee_id: z.string().describe('ID of the employee to delegate to'),
+  priority: z.enum(['high', 'medium', 'low']),
+  deadline: z.string().describe('When the task should be completed'),
+  objective: z.string().describe('One sentence: what outcome is required'),
+  context: z.string().describe('Minimum context the agent needs'),
+  deliverable: z.string().describe('Exact output format expected'),
+  acceptance_criteria: z.string().describe('What makes this done correctly'),
+  escalate_if: z.string().describe("Condition requiring founder's input")
+})
+
+const saveMemorySchema = z.object({
+  content: z.string().describe('Your full updated memory (replaces previous). Include all facts you want to remember.')
+})
+
+const createKnowledgeDocSchema = z.object({
+  title: z.string().describe('Title for the knowledge document'),
+  content: z.string().describe('The document content'),
+  tags: z.array(z.string()).optional().describe('Tags for categorization')
+})
+
+const updateKnowledgeDocSchema = z.object({
+  doc_id: z.string().describe('ID of the document to update'),
+  content: z.string().describe('New content for the document')
+})
+
+const webSearchSchema = z.object({
+  query: z.string().describe('The search query')
+})
+
+const webBrowseSchema = z.object({
+  url: z.string().describe('The URL to visit')
+})
+
+const readFileSchema = z.object({
+  path: z.string().describe('Path to the file')
+})
+
+const writeFileSchema = z.object({
+  path: z.string().describe('Path to the file'),
+  content: z.string().describe('Content to write')
+})
+
+const executeCodeSchema = z.object({
+  language: z.string().describe('Programming language (e.g. python, javascript)'),
+  code: z.string().describe('The code to execute')
+})
+
+const createScheduledTaskSchema = z.object({
+  name: z.string().describe('Short name for the task'),
+  employee_id: z.string().describe('ID of the employee who should execute this task (use your own ID to schedule for yourself)'),
+  brief: z.string().describe('The task description/instructions to execute each time'),
+  schedule: z.enum(['hourly', 'daily', 'weekly']).describe('How often to run'),
+  schedule_time: z.string().optional().describe('When to run, e.g. "08:00" for daily or "monday 09:00" for weekly')
+})
+
+// Build ToolDef objects
+const TOOL_DEFS: Record<string, ToolDef> = {
+  delegate_task: {
+    name: 'delegate_task',
+    description: 'Delegate a task to another employee. Use this when work should be handled by a team member with the right expertise.',
+    schema: delegateTaskSchema,
+    required: ['to_employee_id', 'priority', 'objective', 'context', 'deliverable', 'acceptance_criteria', 'escalate_if']
+  },
+  save_memory: {
+    name: 'save_memory',
+    description: 'Save important facts, decisions, and preferences to your persistent memory. Your memory persists across conversations. Pass the full updated memory content — it replaces your previous memory entirely.',
+    schema: saveMemorySchema,
+    required: ['content']
+  },
+  create_knowledge_doc: {
+    name: 'create_knowledge_doc',
+    description: 'Create a new knowledge document that you and other employees can reference. Use this for important information that should be shared.',
+    schema: createKnowledgeDocSchema,
+    required: ['title', 'content']
+  },
+  update_knowledge_doc: {
+    name: 'update_knowledge_doc',
+    description: 'Update the content of an existing knowledge document by its ID.',
+    schema: updateKnowledgeDocSchema,
+    required: ['doc_id', 'content']
+  },
+  web_search: {
+    name: 'web_search',
+    description: 'Search the web for information',
+    schema: webSearchSchema,
+    required: ['query']
+  },
+  web_browse: {
+    name: 'web_browse',
+    description: 'Visit a URL and read its content',
+    schema: webBrowseSchema,
+    required: ['url']
+  },
+  read_file: {
+    name: 'read_file',
+    description: 'Read a file from the local filesystem',
+    schema: readFileSchema,
+    required: ['path']
+  },
+  write_file: {
+    name: 'write_file',
+    description: 'Write content to a file',
+    schema: writeFileSchema,
+    required: ['path', 'content']
+  },
+  execute_code: {
+    name: 'execute_code',
+    description: 'Execute code in a sandboxed environment',
+    schema: executeCodeSchema,
+    required: ['language', 'code']
+  },
+  create_scheduled_task: {
+    name: 'create_scheduled_task',
+    description: 'Create a recurring scheduled task that runs automatically. Use this to set up daily reports, weekly check-ins, or any recurring work.',
+    schema: createScheduledTaskSchema,
+    required: ['name', 'employee_id', 'brief', 'schedule']
+  }
+}
 
 /**
  * AgentManager handles communication between the renderer and LLM providers.
+ * Uses unified Zod-based tool definitions with provider-specific API routing.
  * Supports OpenAI, Anthropic, Google, Mistral, Ollama, Ollama Cloud,
- * and Vercel AI Gateway via their respective API formats.
+ * and Vercel AI Gateway.
  */
 export class AgentManager {
   private store: EmployeeStore
@@ -65,7 +277,7 @@ export class AgentManager {
       return msg
     }
 
-    // Build system prompt with knowledge documents
+    // Build system prompt with knowledge documents and memory
     const systemPrompt = this.buildSystemPrompt(employee)
 
     // Build message history from conversation
@@ -74,23 +286,12 @@ export class AgentManager {
       content: m.content
     }))
 
-    // Build tools array: delegation + builtin tools
+    // Build unified tools list
     const contactable = this.getContactableEmployees(employee)
     const isAnthropic = provider.id === 'anthropic'
-    const toolsList: Record<string, unknown>[] = []
-
-    // Add delegation tool if employee can contact others
-    if (contactable.length > 0) {
-      toolsList.push(isAnthropic ? this.buildDelegateToolAnthropic() : this.buildDelegateToolOpenAI())
-    }
-
-    // Add builtin tools based on employee configuration
-    const builtinTools = isAnthropic
-      ? this.buildBuiltinToolsAnthropic(employee)
-      : this.buildBuiltinToolsOpenAI(employee)
-    toolsList.push(...builtinTools)
-
-    const tools = toolsList.length > 0 ? toolsList : undefined
+    const toolDefs = this.buildToolDefs(employee, contactable.length > 0)
+    const tools = toolDefs.map(def => isAnthropic ? toAnthropicTool(def) : toOpenAITool(def))
+    const toolsParam = tools.length > 0 ? tools : undefined
 
     try {
       const responseText = await this.callProvider(
@@ -99,7 +300,7 @@ export class AgentManager {
         systemPrompt,
         messages,
         onStream,
-        tools,
+        toolsParam,
         conversationId
       )
 
@@ -139,54 +340,34 @@ export class AgentManager {
   }
 
   /**
-   * Build the delegate_task tool definition for OpenAI-compatible APIs.
+   * Build the list of ToolDef objects for an employee based on their configuration.
+   * Unified — no more dual OpenAI/Anthropic definitions.
    */
-  private buildDelegateToolOpenAI(): Record<string, unknown> {
-    return {
-      type: 'function',
-      function: {
-        name: 'delegate_task',
-        description: 'Delegate a task to another employee. Use this when work should be handled by a team member with the right expertise.',
-        parameters: {
-          type: 'object',
-          properties: {
-            to_employee_id: { type: 'string', description: 'ID of the employee to delegate to' },
-            priority: { type: 'string', enum: ['high', 'medium', 'low'] },
-            deadline: { type: 'string', description: 'When the task should be completed' },
-            objective: { type: 'string', description: 'One sentence: what outcome is required' },
-            context: { type: 'string', description: 'Minimum context the agent needs' },
-            deliverable: { type: 'string', description: 'Exact output format expected' },
-            acceptance_criteria: { type: 'string', description: 'What makes this done correctly' },
-            escalate_if: { type: 'string', description: 'Condition requiring founder\'s input' }
-          },
-          required: ['to_employee_id', 'priority', 'objective', 'context', 'deliverable', 'acceptance_criteria', 'escalate_if']
-        }
-      }
-    }
-  }
+  private buildToolDefs(employee: Employee, canDelegate: boolean): ToolDef[] {
+    const defs: ToolDef[] = []
+    const enabledToolIds = new Set(employee.tools.filter(t => t.enabled && t.source === 'builtin').map(t => t.id))
 
-  /**
-   * Build the delegate_task tool definition for Anthropic API.
-   */
-  private buildDelegateToolAnthropic(): Record<string, unknown> {
-    return {
-      name: 'delegate_task',
-      description: 'Delegate a task to another employee. Use this when work should be handled by a team member with the right expertise.',
-      input_schema: {
-        type: 'object',
-        properties: {
-          to_employee_id: { type: 'string', description: 'ID of the employee to delegate to' },
-          priority: { type: 'string', enum: ['high', 'medium', 'low'] },
-          deadline: { type: 'string', description: 'When the task should be completed' },
-          objective: { type: 'string', description: 'One sentence: what outcome is required' },
-          context: { type: 'string', description: 'Minimum context the agent needs' },
-          deliverable: { type: 'string', description: 'Exact output format expected' },
-          acceptance_criteria: { type: 'string', description: 'What makes this done correctly' },
-          escalate_if: { type: 'string', description: 'Condition requiring founder\'s input' }
-        },
-        required: ['to_employee_id', 'priority', 'objective', 'context', 'deliverable', 'acceptance_criteria', 'escalate_if']
-      }
+    // Delegation tool (only if employee can contact others)
+    if (canDelegate) {
+      defs.push(TOOL_DEFS.delegate_task)
     }
+
+    // Memory tools — always available
+    defs.push(TOOL_DEFS.save_memory)
+    defs.push(TOOL_DEFS.create_knowledge_doc)
+    defs.push(TOOL_DEFS.update_knowledge_doc)
+
+    // Builtin tools based on employee configuration
+    if (enabledToolIds.has('web-search')) defs.push(TOOL_DEFS.web_search)
+    if (enabledToolIds.has('web-browse')) defs.push(TOOL_DEFS.web_browse)
+    if (enabledToolIds.has('file-read')) defs.push(TOOL_DEFS.read_file)
+    if (enabledToolIds.has('file-write')) defs.push(TOOL_DEFS.write_file)
+    if (enabledToolIds.has('code-execute')) defs.push(TOOL_DEFS.execute_code)
+
+    // Scheduled tasks — always available
+    defs.push(TOOL_DEFS.create_scheduled_task)
+
+    return defs
   }
 
   /**
@@ -231,210 +412,61 @@ export class AgentManager {
   }
 
   /**
-   * Build builtin tool definitions for OpenAI-compatible APIs based on employee's enabled tools.
+   * Execute a tool and return the result string.
+   * Handles all tools: delegation, memory, knowledge, builtin, and scheduled tasks.
    */
-  private buildBuiltinToolsOpenAI(employee: Employee): Record<string, unknown>[] {
-    const tools: Record<string, unknown>[] = []
-    const enabledToolIds = new Set(employee.tools.filter(t => t.enabled && t.source === 'builtin').map(t => t.id))
-
-    if (enabledToolIds.has('web-search')) {
-      tools.push({
-        type: 'function',
-        function: {
-          name: 'web_search',
-          description: 'Search the web for information',
-          parameters: {
-            type: 'object',
-            properties: { query: { type: 'string', description: 'The search query' } },
-            required: ['query']
-          }
-        }
-      })
-    }
-    if (enabledToolIds.has('web-browse')) {
-      tools.push({
-        type: 'function',
-        function: {
-          name: 'web_browse',
-          description: 'Visit a URL and read its content',
-          parameters: {
-            type: 'object',
-            properties: { url: { type: 'string', description: 'The URL to visit' } },
-            required: ['url']
-          }
-        }
-      })
-    }
-    if (enabledToolIds.has('file-read')) {
-      tools.push({
-        type: 'function',
-        function: {
-          name: 'read_file',
-          description: 'Read a file from the local filesystem',
-          parameters: {
-            type: 'object',
-            properties: { path: { type: 'string', description: 'Path to the file' } },
-            required: ['path']
-          }
-        }
-      })
-    }
-    if (enabledToolIds.has('file-write')) {
-      tools.push({
-        type: 'function',
-        function: {
-          name: 'write_file',
-          description: 'Write content to a file',
-          parameters: {
-            type: 'object',
-            properties: {
-              path: { type: 'string', description: 'Path to the file' },
-              content: { type: 'string', description: 'Content to write' }
-            },
-            required: ['path', 'content']
-          }
-        }
-      })
-    }
-    if (enabledToolIds.has('code-execute')) {
-      tools.push({
-        type: 'function',
-        function: {
-          name: 'execute_code',
-          description: 'Execute code in a sandboxed environment',
-          parameters: {
-            type: 'object',
-            properties: {
-              language: { type: 'string', description: 'Programming language (e.g. python, javascript)' },
-              code: { type: 'string', description: 'The code to execute' }
-            },
-            required: ['language', 'code']
-          }
-        }
-      })
-    }
-
-    // Always add create_scheduled_task — any agent can schedule recurring work
-    tools.push({
-      type: 'function',
-      function: {
-        name: 'create_scheduled_task',
-        description: 'Create a recurring scheduled task that runs automatically. Use this to set up daily reports, weekly check-ins, or any recurring work.',
-        parameters: {
-          type: 'object',
-          properties: {
-            name: { type: 'string', description: 'Short name for the task' },
-            employee_id: { type: 'string', description: 'ID of the employee who should execute this task (use your own ID to schedule for yourself)' },
-            brief: { type: 'string', description: 'The task description/instructions to execute each time' },
-            schedule: { type: 'string', enum: ['hourly', 'daily', 'weekly'], description: 'How often to run' },
-            schedule_time: { type: 'string', description: 'When to run, e.g. "08:00" for daily or "monday 09:00" for weekly' }
-          },
-          required: ['name', 'employee_id', 'brief', 'schedule']
-        }
-      }
-    })
-
-    return tools
-  }
-
-  /**
-   * Build builtin tool definitions for Anthropic API based on employee's enabled tools.
-   */
-  private buildBuiltinToolsAnthropic(employee: Employee): Record<string, unknown>[] {
-    const tools: Record<string, unknown>[] = []
-    const enabledToolIds = new Set(employee.tools.filter(t => t.enabled && t.source === 'builtin').map(t => t.id))
-
-    if (enabledToolIds.has('web-search')) {
-      tools.push({
-        name: 'web_search',
-        description: 'Search the web for information',
-        input_schema: {
-          type: 'object',
-          properties: { query: { type: 'string', description: 'The search query' } },
-          required: ['query']
-        }
-      })
-    }
-    if (enabledToolIds.has('web-browse')) {
-      tools.push({
-        name: 'web_browse',
-        description: 'Visit a URL and read its content',
-        input_schema: {
-          type: 'object',
-          properties: { url: { type: 'string', description: 'The URL to visit' } },
-          required: ['url']
-        }
-      })
-    }
-    if (enabledToolIds.has('file-read')) {
-      tools.push({
-        name: 'read_file',
-        description: 'Read a file from the local filesystem',
-        input_schema: {
-          type: 'object',
-          properties: { path: { type: 'string', description: 'Path to the file' } },
-          required: ['path']
-        }
-      })
-    }
-    if (enabledToolIds.has('file-write')) {
-      tools.push({
-        name: 'write_file',
-        description: 'Write content to a file',
-        input_schema: {
-          type: 'object',
-          properties: {
-            path: { type: 'string', description: 'Path to the file' },
-            content: { type: 'string', description: 'Content to write' }
-          },
-          required: ['path', 'content']
-        }
-      })
-    }
-    if (enabledToolIds.has('code-execute')) {
-      tools.push({
-        name: 'execute_code',
-        description: 'Execute code in a sandboxed environment',
-        input_schema: {
-          type: 'object',
-          properties: {
-            language: { type: 'string', description: 'Programming language (e.g. python, javascript)' },
-            code: { type: 'string', description: 'The code to execute' }
-          },
-          required: ['language', 'code']
-        }
-      })
-    }
-
-    // Always add create_scheduled_task
-    tools.push({
-      name: 'create_scheduled_task',
-      description: 'Create a recurring scheduled task that runs automatically. Use this to set up daily reports, weekly check-ins, or any recurring work.',
-      input_schema: {
-        type: 'object',
-        properties: {
-          name: { type: 'string', description: 'Short name for the task' },
-          employee_id: { type: 'string', description: 'ID of the employee who should execute this task' },
-          brief: { type: 'string', description: 'The task description/instructions to execute each time' },
-          schedule: { type: 'string', enum: ['hourly', 'daily', 'weekly'], description: 'How often to run' },
-          schedule_time: { type: 'string', description: 'When to run, e.g. "08:00" for daily' }
-        },
-        required: ['name', 'employee_id', 'brief', 'schedule']
-      }
-    })
-
-    return tools
-  }
-
-  /**
-   * Execute a builtin tool and return the result string.
-   */
-  private async executeBuiltinTool(
+  private async executeTool(
     toolName: string,
     args: Record<string, string>,
+    employee: Employee,
     conversationId?: string
   ): Promise<string> {
     switch (toolName) {
+      case 'delegate_task': {
+        const { message } = this.handleDelegateTask(employee, args)
+        return message
+      }
+      case 'save_memory': {
+        const content = args.content || ''
+        this.store.updateEmployeeMemory(employee.id, content)
+        return 'Memory saved successfully. Your updated memory will be included in future conversations.'
+      }
+      case 'create_knowledge_doc': {
+        const title = args.title || 'Untitled Document'
+        const content = args.content || ''
+        let tags: string[] = []
+        try {
+          tags = args.tags ? JSON.parse(args.tags) : []
+        } catch {
+          tags = args.tags ? [args.tags] : []
+        }
+
+        const doc = this.store.createKnowledge({
+          title,
+          content,
+          tags,
+          lastVerifiedAt: null,
+          docType: 'living',
+          reviewIntervalDays: null
+        })
+
+        // Auto-assign to this employee
+        const emp = this.store.getEmployee(employee.id)
+        if (emp) {
+          this.store.updateEmployee(employee.id, {
+            knowledgeIds: [...emp.knowledgeIds, doc.id]
+          })
+        }
+
+        return `Knowledge document "${title}" created (ID: ${doc.id}) and assigned to you. Other employees can also be assigned this document.`
+      }
+      case 'update_knowledge_doc': {
+        const docId = args.doc_id || ''
+        const content = args.content || ''
+        const updated = this.store.updateKnowledge(docId, { content })
+        if (!updated) return `Document with ID "${docId}" not found.`
+        return `Document "${updated.title}" updated successfully.`
+      }
       case 'web_search': {
         try {
           const query = args.query || ''
@@ -442,7 +474,6 @@ export class AgentManager {
             headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Prometheus/1.0)' }
           })
           const html = await response.text()
-          // Strip HTML tags and get text content
           const text = html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
           return text.slice(0, 5000) || `Web search executed for: ${query}`
         } catch {
@@ -473,7 +504,6 @@ export class AgentManager {
       case 'write_file': {
         try {
           writeFileSync(args.path, args.content)
-          // Notify frontend about the written file
           if (conversationId) {
             this.onFileWritten?.({ conversationId, path: args.path, content: args.content })
           }
@@ -633,12 +663,20 @@ export class AgentManager {
   }
 
   /**
-   * Build the full system prompt by appending knowledge documents and team info.
+   * Build the full system prompt including knowledge docs, memory, and team info.
    */
   private buildSystemPrompt(employee: Employee): string {
     let prompt = employee.systemPrompt || ''
 
-    // Append knowledge documents
+    // Append memory section
+    prompt += '\n\n---\n\n# Your Memory'
+    if (employee.memory) {
+      prompt += `\n${employee.memory}`
+    } else {
+      prompt += '\nNo memories yet. Use save_memory to remember important things across conversations.'
+    }
+
+    // Append knowledge documents with IDs so agents can reference them
     if (employee.knowledgeIds.length > 0) {
       const allKnowledge = this.store.listKnowledge()
       const docs = employee.knowledgeIds
@@ -646,17 +684,17 @@ export class AgentManager {
         .filter(Boolean)
 
       if (docs.length > 0) {
-        prompt += '\n\n---\n\n# Reference Documents'
+        prompt += '\n\n---\n\n# Your Knowledge Documents'
         for (const doc of docs) {
-          prompt += `\n\n## ${doc!.title}\n${doc!.content}`
+          prompt += `\n\n## ${doc!.title} [ID: ${doc!.id}]\n${doc!.content}`
         }
       }
     }
 
-    // Append team delegation info
-    // Add employee's own identity (needed for self-scheduling)
+    // Append employee identity
     prompt += `\n\n---\n\nYour ID: ${employee.id}\nYour name: ${employee.name}`
 
+    // Append team delegation info
     const contactable = this.getContactableEmployees(employee)
     if (contactable.length > 0) {
       const departments = this.store.listDepartments()
@@ -669,7 +707,10 @@ export class AgentManager {
       prompt += '\nUse the delegate_task tool when work should be handled by someone else.'
     }
 
-    prompt += '\n\nYou can use create_scheduled_task to set up recurring automated tasks for yourself or any team member.'
+    // Memory and knowledge instructions
+    prompt += '\n\nYou have persistent memory across conversations. Before finishing important conversations, save key facts, decisions, and preferences using save_memory.'
+    prompt += '\nYou can create and update knowledge documents using create_knowledge_doc and update_knowledge_doc.'
+    prompt += '\nYou can use create_scheduled_task to set up recurring automated tasks for yourself or any team member.'
 
     return prompt
   }
@@ -726,7 +767,7 @@ export class AgentManager {
   /**
    * OpenAI Chat Completions format — works for OpenAI, Vercel AI Gateway,
    * Mistral, and Google (via their OpenAI-compatible endpoint).
-   * Supports tool calling for task delegation.
+   * Supports tool calling for all tools.
    */
   private async callOpenAICompatible(
     provider: ProviderConfig,
@@ -793,7 +834,6 @@ export class AgentManager {
     const result = await this.parseSSEStream(response, onStream)
 
     // Check if the non-streaming fallback captured a tool call
-    // For tool calls, we need to do a non-streaming request
     if (tools && tools.length > 0 && !result) {
       return this.callOpenAIWithToolHandling(provider, employee, systemPrompt, apiMessages, tools, onStream, conversationId)
     }
@@ -803,7 +843,7 @@ export class AgentManager {
 
   /**
    * Non-streaming OpenAI call that handles tool use responses.
-   * Supports both delegate_task and builtin tools with follow-up requests.
+   * Supports all tools with follow-up requests.
    */
   private async callOpenAIWithToolHandling(
     provider: ProviderConfig,
@@ -854,7 +894,7 @@ export class AgentManager {
       const choice = (json.choices as Record<string, unknown>[])?.[0]
       const message = choice?.message as Record<string, unknown> | undefined
       const toolCalls = message?.tool_calls as Record<string, unknown>[] | undefined
-      const finishReason = choice?.finish_reason as string
+      const _finishReason = choice?.finish_reason as string
 
       if (toolCalls && toolCalls.length > 0) {
         // Add assistant message with tool calls to history
@@ -864,14 +904,7 @@ export class AgentManager {
         for (const toolCall of toolCalls) {
           const fn = toolCall.function as { name: string; arguments: string }
           const args = JSON.parse(fn.arguments) as Record<string, string>
-          let toolResult: string
-
-          if (fn.name === 'delegate_task') {
-            const { message: delegateMsg } = this.handleDelegateTask(employee, args)
-            toolResult = delegateMsg
-          } else {
-            toolResult = await this.executeBuiltinTool(fn.name, args, conversationId)
-          }
+          const toolResult = await this.executeTool(fn.name, args, employee, conversationId)
 
           // Add tool result to messages
           currentMessages.push({
@@ -899,7 +932,7 @@ export class AgentManager {
 
   /**
    * Anthropic Messages API — uses their native format with caching support.
-   * Supports tool use for task delegation.
+   * Supports tool use for all tools.
    */
   private async callAnthropic(
     provider: ProviderConfig,
@@ -964,7 +997,7 @@ export class AgentManager {
 
   /**
    * Non-streaming Anthropic call that handles tool use responses.
-   * Supports both delegate_task and builtin tools with follow-up requests.
+   * Supports all tools with follow-up requests.
    */
   private async callAnthropicWithToolHandling(
     provider: ProviderConfig,
@@ -1040,14 +1073,7 @@ export class AgentManager {
       // Process tool calls and build tool_result
       const toolResults: Record<string, unknown>[] = []
       for (const toolUse of toolUseBlocks) {
-        let toolResult: string
-
-        if (toolUse.name === 'delegate_task') {
-          const { message: delegateMsg } = this.handleDelegateTask(employee, toolUse.input)
-          toolResult = delegateMsg
-        } else {
-          toolResult = await this.executeBuiltinTool(toolUse.name, toolUse.input, conversationId)
-        }
+        const toolResult = await this.executeTool(toolUse.name, toolUse.input, employee, conversationId)
 
         toolResults.push({
           type: 'tool_result',

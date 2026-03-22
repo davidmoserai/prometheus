@@ -33,6 +33,7 @@ interface Employee {
   provider: string
   model: string
   permissions: PermissionSet
+  memory: string
   departmentId: string | null
   status: 'active' | 'terminated'
   terminatedAt: string | null

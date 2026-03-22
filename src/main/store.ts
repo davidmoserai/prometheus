@@ -78,6 +78,15 @@ export class EmployeeStore {
 
         // Already new format
         if (raw.companies && raw.companyData) {
+          // Ensure all employees have the memory field (added in memory system migration)
+          for (const companyId of Object.keys(raw.companyData)) {
+            const data = raw.companyData[companyId]
+            if (data?.employees) {
+              for (const emp of data.employees) {
+                if (emp.memory === undefined) emp.memory = ''
+              }
+            }
+          }
           return raw as StoreData
         }
 
@@ -130,6 +139,7 @@ export class EmployeeStore {
         tools: e.tools,
         provider: e.provider,
         model: e.model,
+        memory: '',
         departmentId: null,
         status: 'active' as const,
         terminatedAt: null,
@@ -296,6 +306,7 @@ export class EmployeeStore {
   createEmployee(data: Omit<Employee, 'id' | 'createdAt' | 'updatedAt'>): Employee {
     const employee: Employee = {
       ...data,
+      memory: data.memory ?? '',
       departmentId: data.departmentId ?? null,
       status: data.status ?? 'active',
       terminatedAt: data.terminatedAt ?? null,
@@ -320,6 +331,10 @@ export class EmployeeStore {
     }
     this.save()
     return emps[idx]
+  }
+
+  updateEmployeeMemory(id: string, memory: string): Employee | undefined {
+    return this.updateEmployee(id, { memory })
   }
 
   deleteEmployee(id: string): boolean {

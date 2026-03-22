@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ArrowLeft, Save, Sparkles, ArrowRight } from 'lucide-react'
+import { ArrowLeft, Save, Sparkles, ArrowRight, Brain, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -150,6 +150,7 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
       provider,
       model,
       permissions,
+      memory: employee?.memory || '',
       departmentId,
       status: 'active' as const,
       terminatedAt: null
@@ -445,6 +446,50 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
                   </div>
                 </CardContent>
               </Card>
+
+              {/* Memory (read-only, only shown when editing) */}
+              {isEditing && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center" style={{ gap: '8px' }}>
+                      <Brain className="w-4 h-4 text-flame-400 drop-shadow-[0_0_6px_rgba(249,115,22,0.4)]" />
+                      Persistent Memory
+                    </CardTitle>
+                    <CardDescription>
+                      This employee's long-term memory. Agents save important facts here automatically using the save_memory tool.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {employee?.memory ? (
+                      <div className="flex flex-col" style={{ gap: '12px' }}>
+                        <Textarea
+                          value={employee.memory}
+                          readOnly
+                          rows={6}
+                          className="font-mono text-[13px] opacity-80 cursor-default"
+                        />
+                        <div className="flex justify-end">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={async () => {
+                              await updateEmployee(employee.id, { memory: '' })
+                            }}
+                            className="text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            Clear Memory
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-[13px] text-text-tertiary italic">
+                        No memories saved yet. This employee will use save_memory during conversations to remember important information.
+                      </p>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
             </div>
           )}
 

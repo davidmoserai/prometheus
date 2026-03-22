@@ -41,6 +41,7 @@ interface Employee {
     contactAccess: ContactAccess
     autoApproveAll: boolean
   }
+  memory: string
   departmentId: string | null
   status: 'active' | 'terminated'
   terminatedAt: string | null
@@ -147,6 +148,7 @@ let companyData: Record<string, CompanyData> = {
         provider: 'openai',
         model: 'gpt-4o',
         permissions: { canBrowseWeb: true, canReadFiles: true, canWriteFiles: false, canExecuteCode: false, contactAccess: defaultContactAccess, autoApproveAll: false },
+        memory: '',
         departmentId: null,
         status: 'active',
         terminatedAt: null,
@@ -169,6 +171,7 @@ let companyData: Record<string, CompanyData> = {
         provider: 'anthropic',
         model: 'claude-sonnet-4-20250514',
         permissions: { canBrowseWeb: false, canReadFiles: true, canWriteFiles: true, canExecuteCode: true, contactAccess: defaultContactAccess, autoApproveAll: false },
+        memory: '',
         departmentId: engineeringDeptId,
         status: 'active',
         terminatedAt: null,
@@ -188,6 +191,7 @@ let companyData: Record<string, CompanyData> = {
         provider: 'openai',
         model: 'gpt-4o',
         permissions: { canBrowseWeb: true, canReadFiles: false, canWriteFiles: false, canExecuteCode: false, contactAccess: defaultContactAccess, autoApproveAll: false },
+        memory: '',
         departmentId: creativeDeptId,
         status: 'active',
         terminatedAt: null,
