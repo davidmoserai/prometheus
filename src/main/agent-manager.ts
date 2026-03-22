@@ -179,18 +179,12 @@ export class AgentManager {
       stream: true
     }
 
-    // Vercel AI Gateway: enable caching + zero data retention
+    // Vercel AI Gateway: enable caching + native zero data retention
     if (provider.id === 'vercel-ai-gateway') {
-      // Extract provider prefix from model (e.g. 'anthropic' from 'anthropic/claude-sonnet-4.6')
-      const modelProvider = model.split('/')[0]
-      // Pin to the model's provider directly for ZDR compliance
-      const zdrProviders = ['anthropic', 'openai', 'google', 'mistral']
-      const providerOnly = zdrProviders.includes(modelProvider) ? [modelProvider] : undefined
-
-      body.provider_options = {
+      body.providerOptions = {
         gateway: {
           caching: 'auto',
-          ...(providerOnly ? { only: providerOnly } : {})
+          zeroDataRetention: true
         }
       }
     }
@@ -287,10 +281,12 @@ export class AgentManager {
       ...messages
     ]
 
+    // keep_alive keeps model + KV cache in memory for faster subsequent requests
     const body = {
       model,
       messages: apiMessages,
-      stream: true
+      stream: true,
+      keep_alive: '30m'
     }
 
     const response = await fetch(url, {
@@ -328,7 +324,8 @@ export class AgentManager {
     const body = {
       model,
       messages: apiMessages,
-      stream: true
+      stream: true,
+      keep_alive: '30m'
     }
 
     const response = await fetch(url, {
