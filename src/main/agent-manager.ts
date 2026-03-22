@@ -16,62 +16,45 @@ type MastraModel = string | { id: string; url: string; apiKey?: string; headers?
  * Inline objects are used so we never pollute process.env with API keys.
  */
 function buildModelRef(provider: ProviderConfig, model: string): MastraModel {
+  // Set env vars for registered providers (Mastra reads these automatically)
   switch (provider.id) {
-    case 'vercel-ai-gateway':
-      // Model strings already have format "anthropic/claude-sonnet-4.6"
-      // Vercel gateway uses "vercel/{provider}/{model}"
-      return {
-        id: `vercel/${model}`,
-        url: provider.baseUrl || 'https://ai-gateway.vercel.sh/v1',
-        apiKey: provider.apiKey
-      }
-
     case 'openai':
-      return {
-        id: `openai/${model}`,
-        url: 'https://api.openai.com/v1',
-        apiKey: provider.apiKey
-      }
+      process.env.OPENAI_API_KEY = provider.apiKey
+      return `openai/${model}`
 
     case 'anthropic':
-      return {
-        id: `anthropic/${model}`,
-        url: 'https://api.anthropic.com/v1',
-        apiKey: provider.apiKey
-      }
+      process.env.ANTHROPIC_API_KEY = provider.apiKey
+      return `anthropic/${model}`
 
     case 'google':
-      return {
-        id: `google/${model}`,
-        url: 'https://generativelanguage.googleapis.com/v1beta/openai',
-        apiKey: provider.apiKey,
-        headers: { 'x-goog-api-key': provider.apiKey }
-      }
+      process.env.GOOGLE_GENERATIVE_AI_API_KEY = provider.apiKey
+      return `google/${model}`
 
     case 'mistral':
-      return {
-        id: `mistral/${model}`,
-        url: 'https://api.mistral.ai/v1',
-        apiKey: provider.apiKey
-      }
+      process.env.MISTRAL_API_KEY = provider.apiKey
+      return `mistral/${model}`
+
+    case 'ollama-cloud':
+      // Registered provider in Mastra — uses magic string
+      process.env.OLLAMA_API_KEY = provider.apiKey
+      return `ollama-cloud/${model}`
+
+    case 'vercel-ai-gateway':
+      // Uses inline object with custom URL
+      process.env.AI_GATEWAY_API_KEY = provider.apiKey
+      return `vercel/${model}`
 
     case 'ollama':
+      // Local Ollama — custom URL, needs inline object
       return {
-        id: `openai-compatible/${model}`,
+        id: `ollama/${model}`,
         url: (provider.baseUrl || 'http://localhost:11434') + '/v1',
         apiKey: 'not-needed'
       }
 
-    case 'ollama-cloud':
-      return {
-        id: `openai-compatible/${model}`,
-        url: (provider.baseUrl || 'https://ollama.com/api').replace(/\/api$/, '') + '/v1',
-        apiKey: provider.apiKey
-      }
-
     default:
       return {
-        id: model,
+        id: model.includes('/') ? model : `openai/${model}`,
         url: provider.baseUrl || 'https://api.openai.com/v1',
         apiKey: provider.apiKey
       }
@@ -849,8 +832,6 @@ export class AgentManager {
     const provider = settings.providers.find(p => p.id === toEmployee.provider)
     if (!provider) throw new Error(`Provider "${toEmployee.provider}" not found in settings`)
     if (!provider.apiKey && provider.id !== 'ollama') throw new Error(`No API key for ${provider.name}`)
-
-    console.log('continueTask model config:', { providerId: provider.id, model: toEmployee.model, hasApiKey: !!provider.apiKey, baseUrl: provider.baseUrl })
 
     const systemPrompt = this.buildSystemPrompt(toEmployee)
 
