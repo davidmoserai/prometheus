@@ -24,8 +24,16 @@
     ],
     "mac": {
       "icon": "resources/icon.icns",
-      "category": "public.app-category.productivity",
-      "target": "dir"
+      "category": "public.app-category.productivity"
+    },
+    "win": {
+      "icon": "resources/icon.svg",
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false
     },
     "publish": {
       "provider": "github",
