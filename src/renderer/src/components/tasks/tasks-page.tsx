@@ -121,13 +121,27 @@ export function TasksPage() {
 
   const handleReply = async (taskId: string) => {
     if (!replyText.trim() || isReplying) return
+    const msg = replyText.trim()
     const keepExpanded = taskId
+
+    // Clear input and show message immediately
+    setReplyText('')
     setIsReplying(true)
     setReplyError(null)
+
+    // Optimistically add user message to the task's messages for instant feedback
+    const task = tasks.find(t => t.id === taskId)
+    if (task) {
+      task.messages = [...(task.messages || []), {
+        id: `temp-${Date.now()}`,
+        role: 'user' as const,
+        content: msg,
+        timestamp: new Date().toISOString()
+      }]
+    }
+
     try {
-      await replyToTask(taskId, replyText.trim())
-      setReplyText('')
-      // Re-expand the task after loadTasks resets state
+      await replyToTask(taskId, msg)
       setTimeout(() => setExpandedTaskId(keepExpanded), 50)
     } catch (err) {
       setReplyError(err instanceof Error ? err.message : 'Failed to send reply')
@@ -572,6 +586,25 @@ export function TasksPage() {
                                           <p className={`text-[13px] ${msg.role === 'tool' ? 'text-text-tertiary' : 'text-text-primary'} whitespace-pre-wrap`}>{msg.content}</p>
                                         </div>
                                       ))}
+                                      {/* Thinking indicator while agent is working */}
+                                      {isReplying && expandedTaskId === task.id && (
+                                        <div className="rounded-lg bg-bg-tertiary border border-border-default" style={{ padding: '10px 14px' }}>
+                                          <div className="flex items-center" style={{ gap: '6px', marginBottom: '4px' }}>
+                                            <Bot className="w-3 h-3 text-sky-400" />
+                                            <span className="text-[11px] text-text-tertiary">
+                                              {employees.find(e => e.id === task.toEmployeeId)?.name || 'Agent'}
+                                            </span>
+                                          </div>
+                                          <div className="flex items-center" style={{ gap: '6px' }}>
+                                            <div className="flex" style={{ gap: '4px' }}>
+                                              <span className="w-1.5 h-1.5 rounded-full bg-text-tertiary" style={{ animation: 'pulse-dot 1.4s ease-in-out infinite', animationDelay: '0s' }} />
+                                              <span className="w-1.5 h-1.5 rounded-full bg-text-tertiary" style={{ animation: 'pulse-dot 1.4s ease-in-out infinite', animationDelay: '0.2s' }} />
+                                              <span className="w-1.5 h-1.5 rounded-full bg-text-tertiary" style={{ animation: 'pulse-dot 1.4s ease-in-out infinite', animationDelay: '0.4s' }} />
+                                            </div>
+                                            <span className="text-[12px] text-text-tertiary">Working...</span>
+                                          </div>
+                                        </div>
+                                      )}
                                     </div>
                                   </div>
                                 )}
@@ -600,7 +633,7 @@ export function TasksPage() {
                                         style={{ padding: '10px 14px' }}
                                         disabled={isReplying}
                                       />
-                                      <Button size="sm" onClick={() => handleReply(task.id)} disabled={!replyText.trim() || isReplying}>
+                                      <Button size="sm" onClick={() => handleReply(task.id)} disabled={!replyText.trim() || isReplying} style={isReplying ? { cursor: 'not-allowed' } : undefined}>
                                         {isReplying ? 'Sending...' : 'Send'}
                                       </Button>
                                     </div>
