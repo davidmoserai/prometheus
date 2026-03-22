@@ -63,14 +63,16 @@ export function NotificationPanel({ onClose }: NotificationPanelProps) {
   return (
     <div
       ref={panelRef}
-      className="absolute z-50 rounded-xl border border-border-bright bg-bg-secondary shadow-[0_8px_40px_-8px_rgba(0,0,0,0.6)] animate-fade-in"
+      className="fixed z-50 rounded-xl border border-border-bright animate-fade-in"
       style={{
         bottom: '60px',
         left: '16px',
         width: '320px',
         maxHeight: '420px',
         display: 'flex',
-        flexDirection: 'column'
+        flexDirection: 'column',
+        backgroundColor: '#1e1e23',
+        boxShadow: '0 16px 48px -8px rgba(0,0,0,0.8), 0 0 0 1px rgba(255,255,255,0.06)'
       }}
     >
       {/* Header */}
