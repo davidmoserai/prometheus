@@ -62,6 +62,9 @@ interface KnowledgeDocument {
   title: string
   content: string
   tags: string[]
+  lastVerifiedAt: string | null
+  docType: 'living' | 'reference'
+  reviewIntervalDays: number | null
   createdAt: string
   updatedAt: string
 }
@@ -124,6 +127,15 @@ interface RecurringTask {
   updatedAt: string
 }
 
+interface AppNotification {
+  id: string
+  type: 'task_completed' | 'task_escalated' | 'recurring_executed' | 'tool_approval' | 'info'
+  title: string
+  body: string
+  read: boolean
+  timestamp: string
+}
+
 interface AppSettings {
   providers: ProviderConfig[]
   defaultProvider: string
@@ -147,6 +159,9 @@ interface AppState {
   // Task data
   tasks: Task[]
   recurringTasks: RecurringTask[]
+
+  // Notifications
+  notifications: AppNotification[]
 
   // UI State
   activeView: 'dashboard' | 'employees' | 'chat' | 'knowledge' | 'tasks' | 'settings'
@@ -196,6 +211,7 @@ interface AppState {
   createKnowledge: (data: Omit<KnowledgeDocument, 'id' | 'createdAt' | 'updatedAt'>) => Promise<KnowledgeDocument>
   updateKnowledge: (id: string, data: Partial<KnowledgeDocument>) => Promise<void>
   deleteKnowledge: (id: string) => Promise<void>
+  verifyKnowledge: (id: string) => Promise<void>
 
   // Actions — Conversations & Chat
   loadConversations: (employeeId: string) => Promise<void>
@@ -219,6 +235,12 @@ interface AppState {
   getTokenCount: (conversationId: string) => Promise<number>
   compressConversation: (conversationId: string) => Promise<void>
 
+  // Actions — Notifications
+  addNotification: (notification: Omit<AppNotification, 'id' | 'read' | 'timestamp'>) => void
+  markNotificationRead: (id: string) => void
+  markAllNotificationsRead: () => void
+  clearNotifications: () => void
+
   // Actions — Settings
   loadSettings: () => Promise<void>
   updateSettings: (settings: Partial<AppSettings>) => Promise<void>
@@ -234,6 +256,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   conversations: [],
   tasks: [],
   recurringTasks: [],
+  notifications: [],
   settings: null,
   activeView: 'dashboard',
   selectedEmployeeId: null,
@@ -395,6 +418,11 @@ export const useAppStore = create<AppState>((set, get) => ({
     await get().loadKnowledge()
   },
 
+  verifyKnowledge: async (id) => {
+    await window.api.knowledge.verify(id)
+    await get().loadKnowledge()
+  },
+
   // Conversations
   loadConversations: async (employeeId: string) => {
     const conversations = await window.api.conversations.list(employeeId)
@@ -502,6 +530,34 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
+  // Notifications
+  addNotification: (notification) =>
+    set((state) => ({
+      notifications: [
+        {
+          ...notification,
+          id: crypto.randomUUID(),
+          read: false,
+          timestamp: new Date().toISOString()
+        },
+        ...state.notifications
+      ].slice(0, 50) // Keep last 50 notifications
+    })),
+
+  markNotificationRead: (id) =>
+    set((state) => ({
+      notifications: state.notifications.map(n =>
+        n.id === id ? { ...n, read: true } : n
+      )
+    })),
+
+  markAllNotificationsRead: () =>
+    set((state) => ({
+      notifications: state.notifications.map(n => ({ ...n, read: true }))
+    })),
+
+  clearNotifications: () => set({ notifications: [] }),
+
   // Settings
   loadSettings: async () => {
     const settings = await window.api.settings.get()
@@ -514,4 +570,4 @@ export const useAppStore = create<AppState>((set, get) => ({
   }
 }))
 
-export type { Company, Department, ContactAccess, Employee, KnowledgeDocument, Conversation, ChatMessage, Task, RecurringTask, AppSettings, ProviderConfig, ToolAssignment, PermissionSet }
+export type { Company, Department, ContactAccess, Employee, KnowledgeDocument, Conversation, ChatMessage, Task, RecurringTask, AppNotification, AppSettings, ProviderConfig, ToolAssignment, PermissionSet }

@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { Sidebar } from '@/components/layout/sidebar'
 import { Dashboard } from '@/components/dashboard/dashboard'
 import { EmployeesPage } from '@/components/employees/employees-page'
@@ -10,6 +10,7 @@ import { useAppStore, type ChatMessage } from '@/stores/app-store'
 
 export default function App() {
   const { activeView, loadCompanies, loadEmployees, loadTerminatedEmployees, loadDepartments, loadKnowledge, loadTasks, loadRecurringTasks, loadSettings } = useAppStore()
+  const [updateReady, setUpdateReady] = useState(false)
 
   // Load companies first, then scoped data
   useEffect(() => {
@@ -72,6 +73,28 @@ export default function App() {
     return unsub
   }, [])
 
+  // Set up notification listener from main process
+  useEffect(() => {
+    if (!window.api?.notifications?.onNotification) return
+    const unsub = window.api.notifications.onNotification((data) => {
+      useAppStore.getState().addNotification({
+        type: data.type as 'task_completed' | 'task_escalated' | 'recurring_executed' | 'tool_approval' | 'info',
+        title: data.title,
+        body: data.body
+      })
+    })
+    return unsub
+  }, [])
+
+  // Listen for auto-update downloaded event
+  useEffect(() => {
+    if (!window.api?.updates?.onDownloaded) return
+    const unsub = window.api.updates.onDownloaded(() => {
+      setUpdateReady(true)
+    })
+    return unsub
+  }, [])
+
   const renderView = () => {
     switch (activeView) {
       case 'dashboard':
@@ -93,6 +116,17 @@ export default function App() {
     <div className="flex bg-bg-primary" style={{ height: '100vh', overflow: 'hidden' }}>
       <Sidebar />
       <main className="relative flex-1" style={{ height: '100%', overflow: 'hidden' }}>
+        {updateReady && (
+          <div className="relative z-50 flex items-center justify-center gap-3 bg-flame-500/90 px-4 py-2 text-sm font-medium text-white">
+            <span>Update available. Restart to update.</span>
+            <button
+              onClick={() => window.api?.updates?.install()}
+              className="rounded-lg bg-white/20 px-3 py-1 text-xs font-semibold transition-colors hover:bg-white/30"
+            >
+              Restart
+            </button>
+          </div>
+        )}
         <div className="absolute inset-0 gradient-mesh pointer-events-none" />
         <div className="relative h-full">
           {renderView()}

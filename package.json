@@ -26,6 +26,11 @@
       "icon": "resources/icon.icns",
       "category": "public.app-category.productivity",
       "target": "dir"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "davidmoserai",
+      "repo": "prometheus"
     }
   },
   "repository": {
@@ -55,6 +60,7 @@
     "@tailwindcss/typography": "^0.5.19",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "electron-updater": "^6.8.3",
     "lucide-react": "^0.577.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",

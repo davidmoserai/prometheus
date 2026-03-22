@@ -373,6 +373,9 @@ export class EmployeeStore {
   createKnowledge(data: Omit<KnowledgeDocument, 'id' | 'createdAt' | 'updatedAt'>): KnowledgeDocument {
     const doc: KnowledgeDocument = {
       ...data,
+      lastVerifiedAt: data.lastVerifiedAt ?? null,
+      docType: data.docType ?? 'reference',
+      reviewIntervalDays: data.reviewIntervalDays ?? null,
       id: uuid(),
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
@@ -390,6 +393,19 @@ export class EmployeeStore {
       ...docs[idx],
       ...data,
       id,
+      updatedAt: new Date().toISOString()
+    }
+    this.save()
+    return docs[idx]
+  }
+
+  verifyKnowledge(id: string): KnowledgeDocument | undefined {
+    const docs = this.getActiveData().knowledge
+    const idx = docs.findIndex(k => k.id === id)
+    if (idx === -1) return undefined
+    docs[idx] = {
+      ...docs[idx],
+      lastVerifiedAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     }
     this.save()

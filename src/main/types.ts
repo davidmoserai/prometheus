@@ -60,6 +60,9 @@ export interface KnowledgeDocument {
   title: string
   content: string
   tags: string[]
+  lastVerifiedAt: string | null
+  docType: 'living' | 'reference'
+  reviewIntervalDays: number | null
   createdAt: string
   updatedAt: string
 }

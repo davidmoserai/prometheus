@@ -29,7 +29,8 @@ const api = {
     list: () => ipcRenderer.invoke('knowledge:list'),
     create: (data: unknown) => ipcRenderer.invoke('knowledge:create', data),
     update: (id: string, data: unknown) => ipcRenderer.invoke('knowledge:update', id, data),
-    delete: (id: string) => ipcRenderer.invoke('knowledge:delete', id)
+    delete: (id: string) => ipcRenderer.invoke('knowledge:delete', id),
+    verify: (id: string) => ipcRenderer.invoke('knowledge:verify', id)
   },
   conversations: {
     list: (employeeId: string) => ipcRenderer.invoke('conversations:list', employeeId),
@@ -84,9 +85,29 @@ const api = {
       return () => ipcRenderer.removeListener('recurringTask:executed', handler)
     }
   },
+  notifications: {
+    onNotification: (callback: (data: { type: string; title: string; body: string }) => void) => {
+      const handler = (_event: unknown, data: { type: string; title: string; body: string }) => callback(data)
+      ipcRenderer.on('notification', handler)
+      return () => { ipcRenderer.removeListener('notification', handler) }
+    }
+  },
   settings: {
     get: () => ipcRenderer.invoke('settings:get'),
     update: (settings: unknown) => ipcRenderer.invoke('settings:update', settings)
+  },
+  updates: {
+    onAvailable: (callback: () => void) => {
+      const handler = () => callback()
+      ipcRenderer.on('update:available', handler)
+      return () => ipcRenderer.removeListener('update:available', handler)
+    },
+    onDownloaded: (callback: () => void) => {
+      const handler = () => callback()
+      ipcRenderer.on('update:downloaded', handler)
+      return () => ipcRenderer.removeListener('update:downloaded', handler)
+    },
+    install: () => ipcRenderer.invoke('update:install')
   }
 }
 

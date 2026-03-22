@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ArrowLeft, Save, Sparkles } from 'lucide-react'
+import { ArrowLeft, Save, Sparkles, ArrowRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -39,6 +39,61 @@ const DEFAULT_PERMISSIONS: PermissionSet = {
   autoApproveAll: false
 }
 
+// Employee templates for quick creation
+interface EmployeeTemplate {
+  id: string
+  emoji: string
+  label: string
+  role: string
+  systemPrompt: string
+  enabledToolIds: string[]
+}
+
+const TEMPLATES: EmployeeTemplate[] = [
+  {
+    id: 'researcher',
+    emoji: '🔍',
+    label: 'Researcher',
+    role: 'Senior Research Analyst',
+    systemPrompt: 'You are a thorough research analyst. When given a topic, provide comprehensive, well-sourced analysis. Structure findings clearly with key insights, supporting evidence, and actionable recommendations. Always verify claims and note uncertainty levels.',
+    enabledToolIds: ['web-search', 'web-browse']
+  },
+  {
+    id: 'writer',
+    emoji: '✍️',
+    label: 'Writer',
+    role: 'Content Writer & Editor',
+    systemPrompt: 'You are an expert content writer. Adapt your tone and style to the brand voice provided in your knowledge base. Write clearly, concisely, and persuasively. Always match the format requested (blog posts, social media, emails, etc.).',
+    enabledToolIds: ['web-search', 'file-write']
+  },
+  {
+    id: 'developer',
+    emoji: '💻',
+    label: 'Developer',
+    role: 'Full-Stack Developer',
+    systemPrompt: 'You are a senior software developer. Write clean, well-structured code following best practices. Explain your technical decisions. Always consider security, performance, and maintainability. Ask clarifying questions before implementing.',
+    enabledToolIds: ['file-read', 'file-write', 'code-execute']
+  }
+]
+
+function applyTemplate(template: EmployeeTemplate): {
+  avatar: string
+  role: string
+  systemPrompt: string
+  tools: ToolAssignment[]
+} {
+  const tools = DEFAULT_TOOLS.map(t => ({
+    ...t,
+    enabled: template.enabledToolIds.includes(t.id)
+  }))
+  return {
+    avatar: template.emoji,
+    role: template.role,
+    systemPrompt: template.systemPrompt,
+    tools
+  }
+}
+
 interface EmployeeEditorProps {
   employee?: Employee
   onClose: () => void
@@ -48,6 +103,9 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
   const { createEmployee, updateEmployee, knowledge, settings, departments } = useAppStore()
   const isEditing = !!employee
 
+  // Template selection phase (only for new employees)
+  const [templateSelected, setTemplateSelected] = useState(isEditing)
+
   const [name, setName] = useState(employee?.name || '')
   const [role, setRole] = useState(employee?.role || '')
   const [avatar, setAvatar] = useState(employee?.avatar || '🔥')
@@ -56,7 +114,6 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
   const [tools, setTools] = useState<ToolAssignment[]>(employee?.tools || DEFAULT_TOOLS)
   const [provider, setProvider] = useState(employee?.provider || settings?.defaultProvider || 'openai')
   const initialModel = employee?.model || settings?.defaultModel || 'gpt-4o'
-  // If saved model no longer exists in provider's model list, fallback to first available
   const providerModels = settings?.providers.find(p => p.id === (employee?.provider || settings?.defaultProvider || 'openai'))?.models || []
   const validModel = providerModels.includes(initialModel) ? initialModel : (providerModels[0] || initialModel)
   const [model, setModel] = useState(validModel)
@@ -65,6 +122,21 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
   const [activeTab, setActiveTab] = useState<'basic' | 'tools' | 'knowledge' | 'permissions'>('basic')
 
   const enabledProviders = settings?.providers.filter(p => p.enabled || p.id === 'ollama') || []
+
+  // Handle selecting a template
+  const handleSelectTemplate = (template: EmployeeTemplate) => {
+    const preset = applyTemplate(template)
+    setAvatar(preset.avatar)
+    setRole(preset.role)
+    setSystemPrompt(preset.systemPrompt)
+    setTools(preset.tools)
+    setTemplateSelected(true)
+  }
+
+  // Handle "start from scratch"
+  const handleStartFromScratch = () => {
+    setTemplateSelected(true)
+  }
 
   const handleSave = async () => {
     if (!name.trim()) return
@@ -104,6 +176,90 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
     { id: 'knowledge' as const, label: 'Knowledge' },
     { id: 'permissions' as const, label: 'Access' }
   ]
+
+  // Template selection step (only when creating, not editing)
+  if (!templateSelected) {
+    return (
+      <div className="h-full overflow-y-auto">
+        <div className="relative max-w-[720px] mx-auto" style={{ padding: '40px' }}>
+          <div className="ambient-orb ambient-orb-1" style={{ top: '-80px', right: '-150px' }} />
+          <div className="ambient-orb ambient-orb-2" style={{ bottom: '40px', left: '-100px' }} />
+
+          {/* Header */}
+          <div className="flex items-center" style={{ gap: '12px', marginBottom: '40px' }}>
+            <Button variant="ghost" size="icon" onClick={onClose}>
+              <ArrowLeft className="w-4 h-4" />
+            </Button>
+            <div>
+              <h2 className="text-xl font-bold tracking-tight">
+                <span className="gradient-text">Hire New Employee</span>
+              </h2>
+              <p className="text-[13px] text-text-tertiary mt-0.5">
+                Choose a template to get started quickly, or start from scratch
+              </p>
+            </div>
+          </div>
+
+          {/* Template Cards */}
+          <div className="flex flex-col" style={{ gap: '16px', marginBottom: '24px' }}>
+            {TEMPLATES.map((template, i) => (
+              <button
+                key={template.id}
+                className="group relative flex items-center rounded-2xl bg-bg-elevated border border-border-default overflow-hidden transition-all duration-500 cursor-pointer text-left hover:bg-bg-surface hover:border-flame-500/30"
+                style={{
+                  gap: '20px',
+                  padding: '28px',
+                  animationDelay: `${i * 80}ms`,
+                  animation: 'scale-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) both',
+                }}
+                onClick={() => handleSelectTemplate(template)}
+              >
+                <div className="absolute inset-0 bg-gradient-to-r from-flame-500/[0.04] via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+
+                <div className="relative flex items-center justify-center w-14 h-14 rounded-xl bg-gradient-to-br from-flame-500/20 to-flame-600/10 text-2xl shadow-[0_0_20px_-4px_rgba(249,115,22,0.15)]">
+                  {template.emoji}
+                </div>
+                <div className="relative flex-1 min-w-0">
+                  <h3 className="font-semibold text-text-primary text-[15px]">{template.label}</h3>
+                  <p className="text-[13px] text-text-tertiary" style={{ marginTop: '4px' }}>{template.role}</p>
+                  <p className="text-[12px] text-text-tertiary line-clamp-2 leading-relaxed" style={{ marginTop: '8px' }}>
+                    {template.systemPrompt.slice(0, 120)}...
+                  </p>
+                  <div className="flex flex-wrap" style={{ gap: '6px', marginTop: '10px' }}>
+                    {template.enabledToolIds.map(toolId => {
+                      const tool = DEFAULT_TOOLS.find(t => t.id === toolId)
+                      return tool ? (
+                        <Badge key={toolId} variant="secondary">{tool.name}</Badge>
+                      ) : null
+                    })}
+                  </div>
+                </div>
+                <ArrowRight className="relative w-4 h-4 text-text-tertiary opacity-0 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all duration-300" />
+              </button>
+            ))}
+          </div>
+
+          {/* Start from scratch */}
+          <button
+            className="group relative flex items-center justify-center w-full rounded-2xl border border-dashed border-border-default bg-bg-secondary hover:bg-bg-elevated hover:border-border-bright transition-all duration-500 cursor-pointer"
+            style={{
+              padding: '24px',
+              animation: 'scale-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) both',
+              animationDelay: '240ms',
+            }}
+            onClick={handleStartFromScratch}
+          >
+            <div className="relative flex items-center" style={{ gap: '12px' }}>
+              <Sparkles className="w-5 h-5 text-text-tertiary group-hover:text-flame-400 transition-colors duration-300" />
+              <span className="text-[14px] font-medium text-text-secondary group-hover:text-text-primary transition-colors duration-300">
+                Start from scratch
+              </span>
+            </div>
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="h-full overflow-y-auto">

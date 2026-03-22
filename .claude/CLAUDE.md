@@ -60,6 +60,14 @@ Tailwind spacing utilities (`p-7`, `mb-5`, `gap-6`, etc.) do NOT render at corre
 - Tasks page has "Scheduled Tasks" section with create/edit form, enable/disable toggle
 - Scheduler auto-creates conversations and delegates tasks to employees
 
+## Notification System
+- **Native notifications**: Electron `Notification` API fires for task completed, task escalated, recurring task executed
+- **In-app notification center**: Bell icon in sidebar bottom, opens `NotificationPanel` dropdown
+- **Store**: `AppNotification` type in Zustand store with `addNotification`, `markNotificationRead`, `markAllNotificationsRead`, `clearNotifications`
+- **IPC bridge**: Main process sends `notification` events via `webContents.send()`, preload exposes `notifications.onNotification()`, App.tsx listens and adds to store
+- **Types**: `task_completed`, `task_escalated`, `recurring_executed`, `tool_approval` (future), `info`
+- **Component**: `components/notifications/notification-panel.tsx` — dropdown panel with unread dot, mark all read, click-to-navigate
+
 ## Key Files
 - `src/main/index.ts` — Electron entry, IPC handlers (store/agentManager init in `app.whenReady()`)
 - `src/main/store.ts` — EmployeeStore class, JSON persistence, company-scoped data

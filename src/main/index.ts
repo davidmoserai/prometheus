@@ -1,4 +1,5 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, Notification, shell } from 'electron'
+import { autoUpdater } from 'electron-updater'
 import { join } from 'path'
 import { EmployeeStore } from './store'
 import { AgentManager } from './agent-manager'
@@ -71,6 +72,7 @@ function registerIpcHandlers(): void {
   ipcMain.handle('knowledge:create', (_event, data) => store.createKnowledge(data))
   ipcMain.handle('knowledge:update', (_event, id: string, data) => store.updateKnowledge(id, data))
   ipcMain.handle('knowledge:delete', (_event, id: string) => store.deleteKnowledge(id))
+  ipcMain.handle('knowledge:verify', (_event, id: string) => store.verifyKnowledge(id))
 
   // Conversation IPC Handlers
   ipcMain.handle('conversations:list', (_event, employeeId: string) => store.listConversations(employeeId))
@@ -119,6 +121,11 @@ function registerIpcHandlers(): void {
   // Settings IPC Handlers
   ipcMain.handle('settings:get', () => store.getSettings())
   ipcMain.handle('settings:update', (_event, settings) => store.updateSettings(settings))
+
+  // Auto-update IPC Handler
+  ipcMain.handle('update:install', () => {
+    autoUpdater.quitAndInstall()
+  })
 }
 
 app.whenReady().then(() => {
@@ -129,6 +136,28 @@ app.whenReady().then(() => {
   // Push task updates to frontend in real-time
   agentManager.setTaskUpdateCallback((task) => {
     mainWindow?.webContents.send('task:updated', task)
+
+    // Send native + in-app notifications for completed/escalated tasks
+    if (task.status === 'completed' || task.status === 'escalated') {
+      const employee = store.getEmployee(task.toEmployeeId)
+      const employeeName = employee?.name || 'Employee'
+
+      const notificationType = task.status === 'completed' ? 'task_completed' : 'task_escalated'
+      const title = task.status === 'completed' ? 'Task Completed' : 'Task Escalated'
+      const body = task.status === 'completed'
+        ? `${employeeName} finished: ${task.objective}`
+        : `${employeeName} escalated: ${task.objective}`
+
+      // Native macOS notification
+      new Notification({
+        title,
+        body,
+        icon: join(__dirname, '../../resources/icon.png')
+      }).show()
+
+      // Push to renderer for in-app notification center
+      mainWindow?.webContents.send('notification', { type: notificationType, title, body })
+    }
   })
 
   // Push file-written events to frontend
@@ -140,11 +169,40 @@ app.whenReady().then(() => {
   scheduler = new Scheduler(store, agentManager)
   scheduler.setTaskRunCallback((recurringTask) => {
     mainWindow?.webContents.send('recurringTask:executed', recurringTask)
+
+    // Send native + in-app notification for recurring task execution
+    const employee = store.getEmployee(recurringTask.employeeId)
+    const employeeName = employee?.name || 'Employee'
+    const title = 'Recurring Task Executed'
+    const body = `${employeeName} ran: ${recurringTask.name}`
+
+    new Notification({
+      title,
+      body,
+      icon: join(__dirname, '../../resources/icon.png')
+    }).show()
+
+    mainWindow?.webContents.send('notification', { type: 'recurring_executed', title, body })
   })
   scheduler.start()
 
   registerIpcHandlers()
   createWindow()
+
+  // Check for updates (will fail silently in dev mode)
+  try {
+    autoUpdater.checkForUpdatesAndNotify()
+
+    autoUpdater.on('update-available', () => {
+      mainWindow?.webContents.send('update:available')
+    })
+
+    autoUpdater.on('update-downloaded', () => {
+      mainWindow?.webContents.send('update:downloaded')
+    })
+  } catch {
+    // Auto-updater not available in dev mode
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

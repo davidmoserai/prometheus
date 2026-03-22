@@ -13,10 +13,12 @@ import {
   Pencil,
   Trash2,
   PanelLeftClose,
-  PanelLeftOpen
+  PanelLeftOpen,
+  Bell
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAppStore } from '@/stores/app-store'
+import { NotificationPanel } from '@/components/notifications/notification-panel'
 
 const COMPANY_AVATARS = [
   '🏢', '🏗️', '🏭', '🏦', '🏛️', '🏠', '🔥', '⚡',
@@ -36,9 +38,10 @@ export function Sidebar() {
   const {
     activeView, setActiveView, employees, tasks, companies, activeCompanyId,
     switchCompany, createCompany, updateCompany, deleteCompany,
-    sidebarCollapsed, toggleSidebar
+    sidebarCollapsed, toggleSidebar, notifications
   } = useAppStore()
 
+  const [notificationPanelOpen, setNotificationPanelOpen] = useState(false)
   const [companySwitcherOpen, setCompanySwitcherOpen] = useState(false)
   const [isCreatingCompany, setIsCreatingCompany] = useState(false)
   const [editingCompanyId, setEditingCompanyId] = useState<string | null>(null)
@@ -145,8 +148,20 @@ export function Sidebar() {
           })}
         </nav>
 
-        {/* Expand + brand */}
-        <div className="flex flex-col items-center z-10" style={{ gap: '12px', paddingTop: '20px', paddingBottom: '20px' }}>
+        {/* Notification bell + Expand + brand */}
+        <div className="relative flex flex-col items-center z-10" style={{ gap: '12px', paddingTop: '20px', paddingBottom: '20px' }}>
+          <button
+            onClick={() => setNotificationPanelOpen(!notificationPanelOpen)}
+            className="relative flex items-center justify-center w-8 h-8 rounded-lg text-text-tertiary hover:text-text-secondary hover:bg-white/[0.04] transition-all cursor-pointer"
+            title="Notifications"
+          >
+            <Bell className="w-4 h-4" />
+            {notifications.filter(n => !n.read).length > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 flex items-center justify-center min-w-[16px] h-4 rounded-full bg-flame-500 text-white text-[10px] font-bold tabular-nums shadow-[0_0_8px_rgba(249,115,22,0.4)]" style={{ padding: '0 4px' }}>
+                {notifications.filter(n => !n.read).length}
+              </span>
+            )}
+          </button>
           <button
             onClick={toggleSidebar}
             className="flex items-center justify-center w-8 h-8 rounded-lg text-text-tertiary hover:text-text-secondary hover:bg-white/[0.04] transition-all cursor-pointer"
@@ -157,6 +172,9 @@ export function Sidebar() {
           <div className="relative flex items-center justify-center w-6 h-6 rounded-lg bg-gradient-to-br from-flame-500/25 to-flame-700/20 shadow-[0_0_12px_-2px_rgba(249,115,22,0.25)]">
             <Flame className="w-3.5 h-3.5 text-flame-400 fire-flicker" />
           </div>
+          {notificationPanelOpen && (
+            <NotificationPanel onClose={() => setNotificationPanelOpen(false)} />
+          )}
         </div>
       </aside>
     )
@@ -402,20 +420,37 @@ export function Sidebar() {
       </nav>
 
       {/* Bottom section */}
-      <div className="flex items-center justify-between z-10" style={{ paddingLeft: '16px', paddingRight: '16px', paddingTop: '20px', paddingBottom: '20px' }}>
+      <div className="relative flex items-center justify-between z-10" style={{ paddingLeft: '16px', paddingRight: '16px', paddingTop: '20px', paddingBottom: '20px' }}>
         <div className="flex items-center" style={{ gap: '10px' }}>
           <div className="relative flex items-center justify-center w-6 h-6 rounded-lg bg-gradient-to-br from-flame-500/25 to-flame-700/20 shadow-[0_0_12px_-2px_rgba(249,115,22,0.25)]">
             <Flame className="w-3.5 h-3.5 text-flame-400 fire-flicker" />
           </div>
           <span className="text-[11px] font-semibold tracking-wide gradient-text-static">Prometheus</span>
         </div>
-        <button
-          onClick={toggleSidebar}
-          className="flex items-center justify-center w-7 h-7 rounded-lg text-text-tertiary hover:text-text-secondary hover:bg-white/[0.04] transition-all cursor-pointer"
-          title="Collapse sidebar"
-        >
-          <PanelLeftClose className="w-3.5 h-3.5" />
-        </button>
+        <div className="flex items-center" style={{ gap: '4px' }}>
+          <button
+            onClick={() => setNotificationPanelOpen(!notificationPanelOpen)}
+            className="relative flex items-center justify-center w-7 h-7 rounded-lg text-text-tertiary hover:text-text-secondary hover:bg-white/[0.04] transition-all cursor-pointer"
+            title="Notifications"
+          >
+            <Bell className="w-3.5 h-3.5" />
+            {notifications.filter(n => !n.read).length > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 flex items-center justify-center min-w-[14px] h-[14px] rounded-full bg-flame-500 text-white text-[9px] font-bold tabular-nums shadow-[0_0_8px_rgba(249,115,22,0.4)]" style={{ padding: '0 3px' }}>
+                {notifications.filter(n => !n.read).length}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={toggleSidebar}
+            className="flex items-center justify-center w-7 h-7 rounded-lg text-text-tertiary hover:text-text-secondary hover:bg-white/[0.04] transition-all cursor-pointer"
+            title="Collapse sidebar"
+          >
+            <PanelLeftClose className="w-3.5 h-3.5" />
+          </button>
+        </div>
+        {notificationPanelOpen && (
+          <NotificationPanel onClose={() => setNotificationPanelOpen(false)} />
+        )}
       </div>
     </aside>
   )

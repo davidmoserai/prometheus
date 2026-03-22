@@ -1,4 +1,4 @@
-import { Users, BookOpen, MessageSquare, ClipboardList, Plus, ArrowRight, Flame } from 'lucide-react'
+import { Users, BookOpen, MessageSquare, ClipboardList, Plus, ArrowRight, Flame, Settings, Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { useAppStore } from '@/stores/app-store'
@@ -7,6 +7,13 @@ export function Dashboard() {
   const { employees, knowledge, conversations, tasks, companies, activeCompanyId, departments, setActiveView, setCreatingEmployee } = useAppStore()
 
   const activeCompany = companies.find(c => c.id === activeCompanyId)
+
+  // Onboarding: show when there are zero employees, zero knowledge docs, and zero conversations
+  const isOnboarding = employees.length === 0 && knowledge.length === 0 && conversations.length === 0
+
+  if (isOnboarding) {
+    return <OnboardingView />
+  }
 
   const stats = [
     {
@@ -201,6 +208,163 @@ export function Dashboard() {
             </Button>
           </div>
         )}
+      </div>
+    </div>
+  )
+}
+
+// Onboarding component for first-time users
+function OnboardingView() {
+  const { setActiveView, setCreatingEmployee } = useAppStore()
+
+  const steps = [
+    {
+      number: 1,
+      title: 'Configure a Provider',
+      description: 'Go to Settings and add your API key for at least one provider.',
+      icon: Settings,
+      gradient: 'from-violet-500/20 via-violet-600/10 to-transparent',
+      iconColor: 'text-violet-400',
+      accentBorder: 'hover:border-violet-500/30',
+      buttonLabel: 'Go to Settings',
+      onClick: () => setActiveView('settings')
+    },
+    {
+      number: 2,
+      title: 'Hire Your First Employee',
+      description: 'Create an AI team member with a role, tools, and knowledge.',
+      icon: Users,
+      gradient: 'from-flame-500/20 via-flame-600/10 to-transparent',
+      iconColor: 'text-flame-400',
+      accentBorder: 'hover:border-flame-500/30',
+      buttonLabel: 'Hire Employee',
+      onClick: () => {
+        setActiveView('employees')
+        setCreatingEmployee(true)
+      }
+    },
+    {
+      number: 3,
+      title: 'Start Working',
+      description: 'Chat with your employees, delegate tasks, and build your team.',
+      icon: MessageSquare,
+      gradient: 'from-emerald-500/20 via-emerald-600/10 to-transparent',
+      iconColor: 'text-emerald-400',
+      accentBorder: 'hover:border-emerald-500/30',
+      buttonLabel: null,
+      onClick: null
+    }
+  ]
+
+  return (
+    <div className="h-full overflow-y-auto">
+      <div className="relative max-w-[960px] mx-auto" style={{ padding: '48px' }}>
+        {/* Ambient orbs */}
+        <div className="ambient-orb ambient-orb-1" style={{ top: '-50px', right: '-100px' }} />
+        <div className="ambient-orb ambient-orb-2" style={{ top: '300px', left: '-80px' }} />
+        <div className="ambient-orb ambient-orb-3" style={{ bottom: '100px', right: '-60px' }} />
+
+        {/* Hero Header */}
+        <div className="relative flex flex-col items-center text-center" style={{ marginBottom: '64px' }}>
+          <div
+            className="flex items-center justify-center w-20 h-20 rounded-2xl bg-gradient-to-br from-flame-500/20 to-ember-500/10 breathe-flame"
+            style={{
+              marginBottom: '32px',
+              animation: 'scale-in 0.6s cubic-bezier(0.16, 1, 0.3, 1) both',
+            }}
+          >
+            <Flame className="w-10 h-10 text-flame-400 fire-flicker" />
+          </div>
+          <h2
+            className="text-[32px] font-bold tracking-tight"
+            style={{
+              animation: 'scale-in 0.6s cubic-bezier(0.16, 1, 0.3, 1) both',
+              animationDelay: '80ms',
+            }}
+          >
+            <span className="gradient-text">Welcome to Prometheus</span>
+          </h2>
+          <p
+            className="text-text-tertiary text-[16px] max-w-lg leading-relaxed"
+            style={{
+              marginTop: '16px',
+              animation: 'scale-in 0.6s cubic-bezier(0.16, 1, 0.3, 1) both',
+              animationDelay: '160ms',
+            }}
+          >
+            Your AI workforce starts here. Here is how to get started:
+          </p>
+        </div>
+
+        {/* Onboarding Steps */}
+        <div className="flex flex-col" style={{ gap: '20px', marginBottom: '48px' }}>
+          {steps.map((step, i) => {
+            const Icon = step.icon
+            return (
+              <div
+                key={step.number}
+                className={`group relative rounded-2xl bg-bg-elevated border border-border-default overflow-hidden transition-all duration-500 ${step.accentBorder}`}
+                style={{
+                  padding: '32px',
+                  animationDelay: `${(i + 2) * 100}ms`,
+                  animation: 'scale-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) both',
+                }}
+              >
+                {/* Gradient background on hover */}
+                <div className={`absolute inset-0 bg-gradient-to-r ${step.gradient} opacity-0 group-hover:opacity-40 transition-opacity duration-500`} />
+
+                <div className="relative flex items-start" style={{ gap: '24px' }}>
+                  {/* Step number + icon */}
+                  <div className="flex items-center justify-center w-12 h-12 rounded-xl bg-gradient-to-br from-white/[0.06] to-white/[0.02] border border-white/[0.06] shrink-0">
+                    <Icon className={`w-5 h-5 ${step.iconColor}`} />
+                  </div>
+
+                  {/* Content */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center" style={{ gap: '10px', marginBottom: '6px' }}>
+                      <span className="text-[12px] font-bold text-flame-400">STEP {step.number}</span>
+                    </div>
+                    <h3 className="text-[16px] font-semibold text-text-primary">{step.title}</h3>
+                    <p className="text-[13px] text-text-tertiary leading-relaxed" style={{ marginTop: '6px' }}>
+                      {step.description}
+                    </p>
+                  </div>
+
+                  {/* Action button */}
+                  {step.buttonLabel && step.onClick && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={step.onClick}
+                      className="shrink-0 self-center"
+                    >
+                      {step.buttonLabel}
+                      <ArrowRight className="w-3.5 h-3.5 ml-1" />
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+
+        {/* Tip */}
+        <div
+          className="relative rounded-2xl bg-gradient-to-r from-flame-500/[0.04] via-transparent to-flame-500/[0.04] border border-flame-500/10 overflow-hidden"
+          style={{
+            padding: '24px 32px',
+            animation: 'scale-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) both',
+            animationDelay: '500ms',
+          }}
+        >
+          <div className="flex items-center" style={{ gap: '16px' }}>
+            <Sparkles className="w-5 h-5 text-flame-400 shrink-0 drop-shadow-[0_0_8px_rgba(249,115,22,0.4)]" />
+            <p className="text-[13px] text-text-secondary leading-relaxed">
+              <span className="font-semibold text-text-primary">Tip:</span>{' '}
+              Try one of our templates — Researcher, Writer, or Developer — to get started quickly.
+            </p>
+          </div>
+        </div>
       </div>
     </div>
   )

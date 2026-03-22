@@ -53,6 +53,9 @@ interface KnowledgeDocument {
   title: string
   content: string
   tags: string[]
+  lastVerifiedAt: string | null
+  docType: 'living' | 'reference'
+  reviewIntervalDays: number | null
   createdAt: string
   updatedAt: string
 }
@@ -198,6 +201,9 @@ let companyData: Record<string, CompanyData> = {
         title: 'Company Brand Guidelines',
         content: '# Brand Guidelines\n\n## Voice & Tone\n- Professional yet approachable\n- Clear and concise\n- Technically accurate\n\n## Values\n- Innovation first\n- User-centric design\n- Transparency in all communications',
         tags: ['brand', 'guidelines'],
+        lastVerifiedAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
+        docType: 'living',
+        reviewIntervalDays: 14,
         createdAt: now(),
         updatedAt: now()
       },
@@ -206,6 +212,9 @@ let companyData: Record<string, CompanyData> = {
         title: 'Code Standards',
         content: '# Code Standards\n\n## TypeScript\n- Use strict mode\n- Prefer interfaces over types\n- No `any` types\n\n## React\n- Functional components only\n- Use hooks for state\n- Keep components small and focused',
         tags: ['code', 'standards', 'engineering'],
+        lastVerifiedAt: null,
+        docType: 'reference',
+        reviewIntervalDays: null,
         createdAt: now(),
         updatedAt: now()
       }
@@ -341,7 +350,12 @@ export function installMockApi() {
         active.knowledge = active.knowledge.map(k => k.id === id ? { ...k, ...data, updatedAt: now() } : k)
         return active.knowledge.find(k => k.id === id)
       },
-      delete: async (id: string) => { getActive().knowledge = getActive().knowledge.filter(k => k.id !== id); return true }
+      delete: async (id: string) => { getActive().knowledge = getActive().knowledge.filter(k => k.id !== id); return true },
+      verify: async (id: string) => {
+        const active = getActive()
+        active.knowledge = active.knowledge.map(k => k.id === id ? { ...k, lastVerifiedAt: now(), updatedAt: now() } : k)
+        return active.knowledge.find(k => k.id === id)
+      }
     },
     conversations: {
       list: async (employeeId: string) => getActive().conversations.filter(c => c.employeeId === employeeId),
@@ -433,6 +447,9 @@ export function installMockApi() {
         return true
       },
       onExecuted: () => () => {}
+    },
+    notifications: {
+      onNotification: () => () => {}
     },
     settings: {
       get: async () => settings,
