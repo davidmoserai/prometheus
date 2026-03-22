@@ -3,15 +3,15 @@ import { cva, type VariantProps } from 'class-variance-authority'
 import { cn } from '@/lib/utils'
 
 const badgeVariants = cva(
-  'inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium transition-colors',
+  'inline-flex items-center rounded-lg text-[11px] font-medium tracking-wide transition-all duration-300',
   {
     variants: {
       variant: {
-        default: 'bg-flame-500/15 text-flame-400 border border-flame-500/20',
-        secondary: 'bg-bg-surface text-text-secondary border border-border-subtle',
-        success: 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/20',
-        warning: 'bg-amber-500/15 text-amber-400 border border-amber-500/20',
-        destructive: 'bg-ember-500/15 text-ember-400 border border-ember-500/20'
+        default: 'bg-gradient-to-r from-flame-500/15 to-flame-600/10 text-flame-400 shadow-[0_0_12px_-3px_rgba(249,115,22,0.15)]',
+        secondary: 'bg-bg-tertiary text-text-secondary border border-border-default',
+        success: 'bg-gradient-to-r from-emerald-500/12 to-emerald-600/8 text-emerald-400 shadow-[0_0_12px_-3px_rgba(16,185,129,0.1)]',
+        warning: 'bg-gradient-to-r from-amber-500/12 to-amber-600/8 text-amber-400 shadow-[0_0_12px_-3px_rgba(245,158,11,0.1)]',
+        destructive: 'bg-gradient-to-r from-ember-500/12 to-ember-600/8 text-ember-400 shadow-[0_0_12px_-3px_rgba(244,63,42,0.1)]'
       }
     },
     defaultVariants: {
@@ -24,8 +24,8 @@ interface BadgeProps
   extends HTMLAttributes<HTMLDivElement>,
     VariantProps<typeof badgeVariants> {}
 
-function Badge({ className, variant, ...props }: BadgeProps) {
-  return <div className={cn(badgeVariants({ variant }), className)} {...props} />
+function Badge({ className, variant, style, ...props }: BadgeProps) {
+  return <div className={cn(badgeVariants({ variant }), className)} style={{ paddingLeft: '10px', paddingRight: '10px', paddingTop: '4px', paddingBottom: '4px', ...style }} {...props} />
 }
 
 export { Badge, badgeVariants }

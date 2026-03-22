@@ -1,12 +1,29 @@
 import { contextBridge, ipcRenderer } from 'electron'
 
 const api = {
+  companies: {
+    list: () => ipcRenderer.invoke('companies:list'),
+    getActive: () => ipcRenderer.invoke('companies:getActive'),
+    setActive: (id: string) => ipcRenderer.invoke('companies:setActive', id),
+    create: (data: unknown) => ipcRenderer.invoke('companies:create', data),
+    update: (id: string, data: unknown) => ipcRenderer.invoke('companies:update', id, data),
+    delete: (id: string) => ipcRenderer.invoke('companies:delete', id)
+  },
+  departments: {
+    list: () => ipcRenderer.invoke('departments:list'),
+    create: (data: unknown) => ipcRenderer.invoke('departments:create', data),
+    update: (id: string, data: unknown) => ipcRenderer.invoke('departments:update', id, data),
+    delete: (id: string) => ipcRenderer.invoke('departments:delete', id)
+  },
   employees: {
     list: () => ipcRenderer.invoke('employees:list'),
+    listTerminated: () => ipcRenderer.invoke('employees:listTerminated'),
     get: (id: string) => ipcRenderer.invoke('employees:get', id),
     create: (data: unknown) => ipcRenderer.invoke('employees:create', data),
     update: (id: string, data: unknown) => ipcRenderer.invoke('employees:update', id, data),
-    delete: (id: string) => ipcRenderer.invoke('employees:delete', id)
+    delete: (id: string) => ipcRenderer.invoke('employees:delete', id),
+    fire: (id: string) => ipcRenderer.invoke('employees:fire', id),
+    rehire: (id: string) => ipcRenderer.invoke('employees:rehire', id)
   },
   knowledge: {
     list: () => ipcRenderer.invoke('knowledge:list'),
@@ -17,7 +34,8 @@ const api = {
   conversations: {
     list: (employeeId: string) => ipcRenderer.invoke('conversations:list', employeeId),
     get: (id: string) => ipcRenderer.invoke('conversations:get', id),
-    create: (employeeId: string) => ipcRenderer.invoke('conversations:create', employeeId)
+    create: (employeeId: string) => ipcRenderer.invoke('conversations:create', employeeId),
+    delete: (id: string) => ipcRenderer.invoke('conversations:delete', id)
   },
   chat: {
     send: (conversationId: string, message: string) =>
@@ -31,16 +49,6 @@ const api = {
   settings: {
     get: () => ipcRenderer.invoke('settings:get'),
     update: (settings: unknown) => ipcRenderer.invoke('settings:update', settings)
-  },
-  oauth: {
-    start: (providerId: string) => ipcRenderer.invoke('oauth:start', providerId),
-    exchange: (providerId: string, code: string) => ipcRenderer.invoke('oauth:exchange', providerId, code),
-    disconnect: (providerId: string) => ipcRenderer.invoke('oauth:disconnect', providerId),
-    onCallback: (callback: (data: { providerId: string; code: string }) => void) => {
-      const handler = (_event: unknown, data: { providerId: string; code: string }) => callback(data)
-      ipcRenderer.on('oauth:callback', handler)
-      return () => ipcRenderer.removeListener('oauth:callback', handler)
-    }
   }
 }
 

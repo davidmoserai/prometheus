@@ -6,7 +6,8 @@ import { Textarea } from '@/components/ui/textarea'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
-import { useAppStore, type Employee, type ToolAssignment, type PermissionSet } from '@/stores/app-store'
+import { ContactAccessEditor } from './contact-access-editor'
+import { useAppStore, type Employee, type ToolAssignment, type PermissionSet, type ContactAccess } from '@/stores/app-store'
 
 const AVATARS = ['🔥', '⚡', '🧠', '🎯', '🚀', '💡', '🔮', '⭐', '🛡️', '🎨', '📊', '🔬', '📝', '🤖', '🦾', '🧬']
 
@@ -23,12 +24,18 @@ const DEFAULT_TOOLS: ToolAssignment[] = [
   { id: 'database', name: 'Database', source: 'mcp', enabled: false, requiresApproval: true }
 ]
 
+const DEFAULT_CONTACT_ACCESS: ContactAccess = {
+  mode: 'none',
+  allowedEmployeeIds: [],
+  allowedDepartmentIds: []
+}
+
 const DEFAULT_PERMISSIONS: PermissionSet = {
   canBrowseWeb: false,
   canReadFiles: false,
   canWriteFiles: false,
   canExecuteCode: false,
-  canContactEmployees: false,
+  contactAccess: DEFAULT_CONTACT_ACCESS,
   autoApproveAll: false
 }
 
@@ -38,7 +45,7 @@ interface EmployeeEditorProps {
 }
 
 export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
-  const { createEmployee, updateEmployee, knowledge, settings } = useAppStore()
+  const { createEmployee, updateEmployee, knowledge, settings, departments } = useAppStore()
   const isEditing = !!employee
 
   const [name, setName] = useState(employee?.name || '')
@@ -50,6 +57,7 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
   const [provider, setProvider] = useState(employee?.provider || settings?.defaultProvider || 'openai')
   const [model, setModel] = useState(employee?.model || settings?.defaultModel || 'gpt-4o')
   const [permissions, setPermissions] = useState<PermissionSet>(employee?.permissions || DEFAULT_PERMISSIONS)
+  const [departmentId, setDepartmentId] = useState<string | null>(employee?.departmentId ?? null)
   const [activeTab, setActiveTab] = useState<'basic' | 'tools' | 'knowledge' | 'permissions'>('basic')
 
   const enabledProviders = settings?.providers.filter(p => p.enabled || p.id === 'ollama') || []
@@ -65,7 +73,10 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
       tools,
       provider,
       model,
-      permissions
+      permissions,
+      departmentId,
+      status: 'active' as const,
+      terminatedAt: null
     }
     if (isEditing && employee) {
       await updateEmployee(employee.id, data)
@@ -92,18 +103,21 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="max-w-3xl mx-auto px-8 py-8">
+      <div className="relative max-w-[720px] mx-auto" style={{ padding: '40px' }}>
+        {/* Ambient orb */}
+        <div className="ambient-orb ambient-orb-1" style={{ top: '-80px', right: '-150px' }} />
+
         {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-3">
+        <div className="flex items-center justify-between" style={{ marginBottom: '32px' }}>
+          <div className="flex items-center" style={{ gap: '12px' }}>
             <Button variant="ghost" size="icon" onClick={onClose}>
               <ArrowLeft className="w-4 h-4" />
             </Button>
             <div>
-              <h2 className="text-xl font-bold text-text-primary">
-                {isEditing ? `Edit ${employee.name}` : 'Hire New Employee'}
+              <h2 className="text-xl font-bold tracking-tight">
+                <span className="gradient-text">{isEditing ? `Edit ${employee.name}` : 'Hire New Employee'}</span>
               </h2>
-              <p className="text-sm text-text-tertiary">
+              <p className="text-[13px] text-text-tertiary mt-0.5">
                 {isEditing ? 'Update their configuration' : 'Configure your new AI team member'}
               </p>
             </div>
@@ -115,16 +129,19 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-1 p-1 bg-bg-secondary rounded-lg border border-border-subtle mb-6">
+        <div className="relative flex bg-bg-tertiary rounded-xl border border-border-default overflow-hidden" style={{ gap: '2px', padding: '6px', marginBottom: '40px' }}>
+          {/* Gradient border effect */}
+          <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-flame-500/[0.03] via-transparent to-flame-500/[0.03] pointer-events-none" />
           {tabs.map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`flex-1 px-4 py-2 rounded-md text-sm font-medium transition-all cursor-pointer ${
+              className={`relative flex-1 rounded-lg text-[13px] font-medium transition-all duration-300 cursor-pointer ${
                 activeTab === tab.id
-                  ? 'bg-bg-surface text-text-primary shadow-sm'
+                  ? 'bg-white/[0.07] text-text-primary shadow-[0_0_16px_-4px_rgba(249,115,22,0.1)]'
                   : 'text-text-tertiary hover:text-text-secondary'
               }`}
+              style={{ padding: '8px 16px' }}
             >
               {tab.label}
             </button>
@@ -134,7 +151,7 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
         {/* Tab Content */}
         <div className="animate-fade-in">
           {activeTab === 'basic' && (
-            <div className="space-y-6">
+            <div className="flex flex-col" style={{ gap: '16px' }}>
               {/* Avatar Selection */}
               <Card>
                 <CardHeader>
@@ -142,15 +159,15 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
                   <CardDescription>Pick an icon for this employee</CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap" style={{ gap: '8px' }}>
                     {AVATARS.map((a) => (
                       <button
                         key={a}
                         onClick={() => setAvatar(a)}
-                        className={`flex items-center justify-center w-11 h-11 rounded-xl text-xl transition-all cursor-pointer ${
+                        className={`flex items-center justify-center w-11 h-11 rounded-xl text-xl transition-all duration-300 cursor-pointer ${
                           avatar === a
-                            ? 'bg-flame-500/15 border-2 border-flame-500 scale-110'
-                            : 'bg-bg-surface border border-border-subtle hover:border-border-bright'
+                            ? 'bg-flame-500/12 ring-2 ring-flame-500/50 scale-110 shadow-[0_0_16px_-4px_rgba(249,115,22,0.3)]'
+                            : 'bg-white/[0.04] hover:bg-white/[0.07] hover:scale-105'
                         }`}
                       >
                         {a}
@@ -166,9 +183,10 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
                   <CardTitle>Identity</CardTitle>
                   <CardDescription>Give your employee a name and role</CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-4">
+                <CardContent>
+                  <div className="flex flex-col" style={{ gap: '16px' }}>
                   <div>
-                    <label className="block text-sm font-medium text-text-secondary mb-1.5">Name</label>
+                    <label className="block text-[13px] font-medium text-text-secondary" style={{ marginBottom: '8px' }}>Name</label>
                     <Input
                       placeholder="e.g. Atlas, Spark, Oracle..."
                       value={name}
@@ -176,12 +194,27 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-text-secondary mb-1.5">Role</label>
+                    <label className="block text-[13px] font-medium text-text-secondary" style={{ marginBottom: '8px' }}>Role</label>
                     <Input
                       placeholder="e.g. Research Analyst, Code Reviewer, Writer..."
                       value={role}
                       onChange={(e) => setRole(e.target.value)}
                     />
+                  </div>
+                  <div>
+                    <label className="block text-[13px] font-medium text-text-secondary" style={{ marginBottom: '8px' }}>Department</label>
+                    <select
+                      value={departmentId || ''}
+                      onChange={(e) => setDepartmentId(e.target.value || null)}
+                      className="flex w-full rounded-xl border border-border-default bg-bg-tertiary text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-flame-500/25 cursor-pointer transition-all duration-300"
+                      style={{ height: '44px', padding: '10px 16px', borderRadius: '12px' }}
+                    >
+                      <option value="">No department</option>
+                      {departments.map((d) => (
+                        <option key={d.id} value={d.id}>{d.name}</option>
+                      ))}
+                    </select>
+                  </div>
                   </div>
                 </CardContent>
               </Card>
@@ -189,9 +222,9 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
               {/* System Prompt */}
               <Card>
                 <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
+                  <CardTitle className="flex items-center" style={{ gap: '8px' }}>
                     System Instructions
-                    <Sparkles className="w-4 h-4 text-flame-400" />
+                    <Sparkles className="w-4 h-4 text-flame-400 drop-shadow-[0_0_6px_rgba(249,115,22,0.4)]" />
                   </CardTitle>
                   <CardDescription>
                     Define how this employee behaves. This is their core personality and expertise.
@@ -203,7 +236,7 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
                     value={systemPrompt}
                     onChange={(e) => setSystemPrompt(e.target.value)}
                     rows={8}
-                    className="font-mono text-sm"
+                    className="font-mono text-[13px]"
                   />
                 </CardContent>
               </Card>
@@ -214,9 +247,10 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
                   <CardTitle>AI Provider</CardTitle>
                   <CardDescription>Choose which LLM powers this employee</CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-4">
+                <CardContent>
+                  <div className="flex flex-col" style={{ gap: '16px' }}>
                   <div>
-                    <label className="block text-sm font-medium text-text-secondary mb-1.5">Provider</label>
+                    <label className="block text-[13px] font-medium text-text-secondary" style={{ marginBottom: '8px' }}>Provider</label>
                     <select
                       value={provider}
                       onChange={(e) => {
@@ -224,7 +258,8 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
                         const prov = settings?.providers.find(p => p.id === e.target.value)
                         if (prov?.models[0]) setModel(prov.models[0])
                       }}
-                      className="flex h-10 w-full rounded-lg border border-border-subtle bg-bg-secondary px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-flame-500/30 focus:border-flame-500/50 cursor-pointer"
+                      className="flex w-full rounded-xl border border-border-default bg-bg-tertiary text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-flame-500/25 cursor-pointer transition-all duration-300"
+                      style={{ height: '44px', padding: '10px 16px', borderRadius: '12px' }}
                     >
                       {enabledProviders.map((p) => (
                         <option key={p.id} value={p.id}>{p.name}</option>
@@ -235,16 +270,18 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-text-secondary mb-1.5">Model</label>
+                    <label className="block text-[13px] font-medium text-text-secondary" style={{ marginBottom: '8px' }}>Model</label>
                     <select
                       value={model}
                       onChange={(e) => setModel(e.target.value)}
-                      className="flex h-10 w-full rounded-lg border border-border-subtle bg-bg-secondary px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-flame-500/30 focus:border-flame-500/50 cursor-pointer"
+                      className="flex w-full rounded-xl border border-border-default bg-bg-tertiary text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-flame-500/25 cursor-pointer transition-all duration-300"
+                      style={{ height: '44px', padding: '10px 16px', borderRadius: '12px' }}
                     >
                       {(settings?.providers.find(p => p.id === provider)?.models || []).map((m) => (
                         <option key={m} value={m}>{m}</option>
                       ))}
                     </select>
+                  </div>
                   </div>
                 </CardContent>
               </Card>
@@ -260,27 +297,30 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="space-y-1">
+                <div className="flex flex-col" style={{ gap: '4px' }}>
                   {tools.map((tool) => (
                     <div
                       key={tool.id}
-                      className={`flex items-center justify-between p-3 rounded-lg transition-all ${
-                        tool.enabled ? 'bg-flame-500/5 border border-flame-500/15' : 'hover:bg-bg-surface'
+                      className={`flex items-center justify-between rounded-xl transition-all duration-300 ${
+                        tool.enabled
+                          ? 'bg-flame-500/[0.04] border border-flame-500/10 shadow-[0_0_16px_-6px_rgba(249,115,22,0.1)]'
+                          : 'hover:bg-white/[0.05] border border-transparent'
                       }`}
+                      style={{ padding: '14px' }}
                     >
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center" style={{ gap: '12px' }}>
                         <Switch
                           checked={tool.enabled}
                           onCheckedChange={() => toggleTool(tool.id)}
                         />
                         <div>
-                          <p className="text-sm font-medium text-text-primary">{tool.name}</p>
+                          <p className="text-[13px] font-medium text-text-primary">{tool.name}</p>
                           <Badge variant="secondary" className="mt-0.5">{tool.source}</Badge>
                         </div>
                       </div>
                       {tool.enabled && (
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-text-tertiary">Needs approval</span>
+                        <div className="flex items-center" style={{ gap: '10px' }}>
+                          <span className="text-[12px] text-text-tertiary">Needs approval</span>
                           <Switch
                             checked={tool.requiresApproval}
                             onCheckedChange={() => toggleToolApproval(tool.id)}
@@ -304,7 +344,7 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
               </CardHeader>
               <CardContent>
                 {knowledge.length > 0 ? (
-                  <div className="space-y-2">
+                  <div className="flex flex-col" style={{ gap: '6px' }}>
                     {knowledge.map((doc) => {
                       const isSelected = selectedKnowledge.includes(doc.id)
                       return (
@@ -317,22 +357,25 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
                                 : [...selectedKnowledge, doc.id]
                             )
                           }}
-                          className={`flex items-center gap-3 w-full p-3 rounded-lg text-left transition-all cursor-pointer ${
+                          className={`flex items-center w-full rounded-xl text-left transition-all duration-300 cursor-pointer ${
                             isSelected
-                              ? 'bg-flame-500/8 border border-flame-500/20'
-                              : 'hover:bg-bg-surface border border-transparent'
+                              ? 'bg-flame-500/[0.05] border border-flame-500/15 shadow-[0_0_16px_-6px_rgba(249,115,22,0.1)]'
+                              : 'hover:bg-white/[0.05] border border-transparent'
                           }`}
+                          style={{ gap: '12px', padding: '14px' }}
                         >
-                          <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all ${
-                            isSelected ? 'bg-flame-600 border-flame-600' : 'border-border-default'
+                          <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all duration-300 ${
+                            isSelected
+                              ? 'bg-gradient-to-br from-flame-500 to-flame-600 border-flame-500 shadow-[0_0_8px_-2px_rgba(249,115,22,0.4)]'
+                              : 'border-white/[0.12]'
                           }`}>
-                            {isSelected && <span className="text-xs text-white">✓</span>}
+                            {isSelected && <span className="text-[11px] text-white">&#10003;</span>}
                           </div>
                           <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-text-primary truncate">{doc.title}</p>
-                            <p className="text-xs text-text-tertiary truncate">{doc.content.slice(0, 80)}...</p>
+                            <p className="text-[13px] font-medium text-text-primary truncate">{doc.title}</p>
+                            <p className="text-[12px] text-text-tertiary truncate">{doc.content.slice(0, 80)}...</p>
                           </div>
-                          <div className="flex gap-1">
+                          <div className="flex" style={{ gap: '6px' }}>
                             {doc.tags.slice(0, 2).map(tag => (
                               <Badge key={tag} variant="secondary">{tag}</Badge>
                             ))}
@@ -342,9 +385,9 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
                     })}
                   </div>
                 ) : (
-                  <div className="text-center py-8">
-                    <p className="text-text-tertiary text-sm">No knowledge documents yet.</p>
-                    <p className="text-text-tertiary text-xs mt-1">Go to Knowledge to create shared documents.</p>
+                  <div className="text-center" style={{ paddingTop: '40px', paddingBottom: '40px' }}>
+                    <p className="text-text-tertiary text-[13px]">No knowledge documents yet.</p>
+                    <p className="text-text-tertiary text-[12px]" style={{ marginTop: '4px' }}>Go to Knowledge to create shared documents.</p>
                   </div>
                 )}
               </CardContent>
@@ -352,39 +395,47 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
           )}
 
           {activeTab === 'permissions' && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Permissions</CardTitle>
-                <CardDescription>
-                  Control what this employee is allowed to do autonomously.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  {([
-                    { key: 'canBrowseWeb' as const, label: 'Browse the web', desc: 'Search and visit websites' },
-                    { key: 'canReadFiles' as const, label: 'Read files', desc: 'Access local file system for reading' },
-                    { key: 'canWriteFiles' as const, label: 'Write files', desc: 'Create and modify local files' },
-                    { key: 'canExecuteCode' as const, label: 'Execute code', desc: 'Run code in a sandboxed environment' },
-                    { key: 'canContactEmployees' as const, label: 'Contact other employees', desc: 'Send tasks and messages to other team members' },
-                    { key: 'autoApproveAll' as const, label: 'Auto-approve all actions', desc: 'Skip confirmation for all tool uses (use with caution)' }
-                  ]).map(({ key, label, desc }) => (
-                    <div key={key} className="flex items-center justify-between py-2">
-                      <div>
-                        <p className="text-sm font-medium text-text-primary">{label}</p>
-                        <p className="text-xs text-text-tertiary">{desc}</p>
+            <div className="flex flex-col" style={{ gap: '16px' }}>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Permissions</CardTitle>
+                  <CardDescription>
+                    Control what this employee is allowed to do autonomously.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex flex-col" style={{ gap: '4px' }}>
+                    {([
+                      { key: 'canBrowseWeb' as const, label: 'Browse the web', desc: 'Search and visit websites' },
+                      { key: 'canReadFiles' as const, label: 'Read files', desc: 'Access local file system for reading' },
+                      { key: 'canWriteFiles' as const, label: 'Write files', desc: 'Create and modify local files' },
+                      { key: 'canExecuteCode' as const, label: 'Execute code', desc: 'Run code in a sandboxed environment' },
+                      { key: 'autoApproveAll' as const, label: 'Auto-approve all actions', desc: 'Skip confirmation for all tool uses (use with caution)' }
+                    ]).map(({ key, label, desc }) => (
+                      <div key={key} className="flex items-center justify-between rounded-xl hover:bg-white/[0.05] transition-all duration-300" style={{ padding: '12px' }}>
+                        <div>
+                          <p className="text-[13px] font-medium text-text-primary">{label}</p>
+                          <p className="text-[12px] text-text-tertiary">{desc}</p>
+                        </div>
+                        <Switch
+                          checked={permissions[key]}
+                          onCheckedChange={(checked) =>
+                            setPermissions({ ...permissions, [key]: checked })
+                          }
+                        />
                       </div>
-                      <Switch
-                        checked={permissions[key]}
-                        onCheckedChange={(checked) =>
-                          setPermissions({ ...permissions, [key]: checked })
-                        }
-                      />
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Contact Access */}
+              <ContactAccessEditor
+                value={permissions.contactAccess}
+                onChange={(contactAccess) => setPermissions({ ...permissions, contactAccess })}
+                currentEmployeeId={employee?.id}
+              />
+            </div>
           )}
         </div>
       </div>

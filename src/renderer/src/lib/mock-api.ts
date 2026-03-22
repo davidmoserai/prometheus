@@ -1,6 +1,28 @@
 // Mock API for web preview mode (when running outside Electron)
 import { v4 as uuid } from 'uuid'
 
+interface Company {
+  id: string
+  name: string
+  avatar: string
+  createdAt: string
+  updatedAt: string
+}
+
+interface Department {
+  id: string
+  name: string
+  color: string
+  createdAt: string
+  updatedAt: string
+}
+
+interface ContactAccess {
+  mode: 'none' | 'specific' | 'all'
+  allowedEmployeeIds: string[]
+  allowedDepartmentIds: string[]
+}
+
 interface Employee {
   id: string
   name: string
@@ -11,7 +33,17 @@ interface Employee {
   tools: { id: string; name: string; source: string; enabled: boolean; requiresApproval: boolean }[]
   provider: string
   model: string
-  permissions: Record<string, boolean>
+  permissions: {
+    canBrowseWeb: boolean
+    canReadFiles: boolean
+    canWriteFiles: boolean
+    canExecuteCode: boolean
+    contactAccess: ContactAccess
+    autoApproveAll: boolean
+  }
+  departmentId: string | null
+  status: 'active' | 'terminated'
+  terminatedAt: string | null
   createdAt: string
   updatedAt: string
 }
@@ -34,92 +66,146 @@ interface Conversation {
   updatedAt: string
 }
 
+interface CompanyData {
+  employees: Employee[]
+  knowledge: KnowledgeDocument[]
+  conversations: Conversation[]
+  departments: Department[]
+}
+
 const now = () => new Date().toISOString()
 
-// In-memory store
-let employees: Employee[] = [
-  {
-    id: uuid(),
-    name: 'Atlas',
-    role: 'Senior Research Analyst',
-    avatar: '🧠',
-    systemPrompt: 'You are Atlas, a senior research analyst. You excel at finding information, synthesizing data, and providing well-sourced answers.',
-    knowledgeIds: [],
-    tools: [
-      { id: 'web-search', name: 'Web Search', source: 'builtin', enabled: true, requiresApproval: false },
-      { id: 'web-browse', name: 'Web Browse', source: 'builtin', enabled: true, requiresApproval: false },
-      { id: 'file-read', name: 'Read Files', source: 'builtin', enabled: true, requiresApproval: false },
-    ],
-    provider: 'openai',
-    model: 'gpt-4o',
-    permissions: { canBrowseWeb: true, canReadFiles: true, canWriteFiles: false, canExecuteCode: false, canContactEmployees: true, autoApproveAll: false },
-    createdAt: now(),
-    updatedAt: now()
-  },
-  {
-    id: uuid(),
-    name: 'Spark',
-    role: 'Full-Stack Developer',
-    avatar: '⚡',
-    systemPrompt: 'You are Spark, an expert full-stack developer. You write clean, efficient code and can debug complex issues.',
-    knowledgeIds: [],
-    tools: [
-      { id: 'file-read', name: 'Read Files', source: 'builtin', enabled: true, requiresApproval: false },
-      { id: 'file-write', name: 'Write Files', source: 'builtin', enabled: true, requiresApproval: true },
-      { id: 'code-execute', name: 'Execute Code', source: 'builtin', enabled: true, requiresApproval: true },
-      { id: 'github', name: 'GitHub', source: 'mcp', enabled: true, requiresApproval: false },
-    ],
-    provider: 'anthropic',
-    model: 'claude-sonnet-4-20250514',
-    permissions: { canBrowseWeb: false, canReadFiles: true, canWriteFiles: true, canExecuteCode: true, canContactEmployees: true, autoApproveAll: false },
-    createdAt: now(),
-    updatedAt: now()
-  },
-  {
-    id: uuid(),
-    name: 'Muse',
-    role: 'Creative Writer & Copywriter',
-    avatar: '🎨',
-    systemPrompt: 'You are Muse, a talented creative writer and copywriter. You craft compelling narratives, marketing copy, and creative content.',
-    knowledgeIds: [],
-    tools: [
-      { id: 'web-search', name: 'Web Search', source: 'builtin', enabled: true, requiresApproval: false },
-    ],
-    provider: 'openai',
-    model: 'gpt-4o',
-    permissions: { canBrowseWeb: true, canReadFiles: false, canWriteFiles: false, canExecuteCode: false, canContactEmployees: true, autoApproveAll: false },
-    createdAt: now(),
-    updatedAt: now()
-  }
+// Default company
+const defaultCompanyId = uuid()
+const engineeringDeptId = uuid()
+const creativeDeptId = uuid()
+
+const defaultContactAccess: ContactAccess = { mode: 'all', allowedEmployeeIds: [], allowedDepartmentIds: [] }
+
+let companies: Company[] = [
+  { id: defaultCompanyId, name: 'My Company', avatar: '🏢', createdAt: now(), updatedAt: now() }
 ]
 
-let knowledge: KnowledgeDocument[] = [
-  {
-    id: uuid(),
-    title: 'Company Brand Guidelines',
-    content: '# Brand Guidelines\n\n## Voice & Tone\n- Professional yet approachable\n- Clear and concise\n- Technically accurate\n\n## Values\n- Innovation first\n- User-centric design\n- Transparency in all communications',
-    tags: ['brand', 'guidelines'],
-    createdAt: now(),
-    updatedAt: now()
-  },
-  {
-    id: uuid(),
-    title: 'Code Standards',
-    content: '# Code Standards\n\n## TypeScript\n- Use strict mode\n- Prefer interfaces over types\n- No `any` types\n\n## React\n- Functional components only\n- Use hooks for state\n- Keep components small and focused',
-    tags: ['code', 'standards', 'engineering'],
-    createdAt: now(),
-    updatedAt: now()
-  }
-]
+let activeCompanyId: string = defaultCompanyId
 
-let conversations: Conversation[] = []
+// Company-scoped data
+let companyData: Record<string, CompanyData> = {
+  [defaultCompanyId]: {
+    departments: [
+      { id: engineeringDeptId, name: 'Engineering', color: 'sky', createdAt: now(), updatedAt: now() },
+      { id: creativeDeptId, name: 'Creative', color: 'violet', createdAt: now(), updatedAt: now() }
+    ],
+    employees: [
+      {
+        id: uuid(),
+        name: 'Atlas',
+        role: 'Senior Research Analyst',
+        avatar: '🧠',
+        systemPrompt: 'You are Atlas, a senior research analyst. You excel at finding information, synthesizing data, and providing well-sourced answers.',
+        knowledgeIds: [],
+        tools: [
+          { id: 'web-search', name: 'Web Search', source: 'builtin', enabled: true, requiresApproval: false },
+          { id: 'web-browse', name: 'Web Browse', source: 'builtin', enabled: true, requiresApproval: false },
+          { id: 'file-read', name: 'Read Files', source: 'builtin', enabled: true, requiresApproval: false },
+        ],
+        provider: 'openai',
+        model: 'gpt-4o',
+        permissions: { canBrowseWeb: true, canReadFiles: true, canWriteFiles: false, canExecuteCode: false, contactAccess: defaultContactAccess, autoApproveAll: false },
+        departmentId: null,
+        status: 'active',
+        terminatedAt: null,
+        createdAt: now(),
+        updatedAt: now()
+      },
+      {
+        id: uuid(),
+        name: 'Spark',
+        role: 'Full-Stack Developer',
+        avatar: '⚡',
+        systemPrompt: 'You are Spark, an expert full-stack developer. You write clean, efficient code and can debug complex issues.',
+        knowledgeIds: [],
+        tools: [
+          { id: 'file-read', name: 'Read Files', source: 'builtin', enabled: true, requiresApproval: false },
+          { id: 'file-write', name: 'Write Files', source: 'builtin', enabled: true, requiresApproval: true },
+          { id: 'code-execute', name: 'Execute Code', source: 'builtin', enabled: true, requiresApproval: true },
+          { id: 'github', name: 'GitHub', source: 'mcp', enabled: true, requiresApproval: false },
+        ],
+        provider: 'anthropic',
+        model: 'claude-sonnet-4-20250514',
+        permissions: { canBrowseWeb: false, canReadFiles: true, canWriteFiles: true, canExecuteCode: true, contactAccess: defaultContactAccess, autoApproveAll: false },
+        departmentId: engineeringDeptId,
+        status: 'active',
+        terminatedAt: null,
+        createdAt: now(),
+        updatedAt: now()
+      },
+      {
+        id: uuid(),
+        name: 'Muse',
+        role: 'Creative Writer & Copywriter',
+        avatar: '🎨',
+        systemPrompt: 'You are Muse, a talented creative writer and copywriter. You craft compelling narratives, marketing copy, and creative content.',
+        knowledgeIds: [],
+        tools: [
+          { id: 'web-search', name: 'Web Search', source: 'builtin', enabled: true, requiresApproval: false },
+        ],
+        provider: 'openai',
+        model: 'gpt-4o',
+        permissions: { canBrowseWeb: true, canReadFiles: false, canWriteFiles: false, canExecuteCode: false, contactAccess: defaultContactAccess, autoApproveAll: false },
+        departmentId: creativeDeptId,
+        status: 'active',
+        terminatedAt: null,
+        createdAt: now(),
+        updatedAt: now()
+      }
+    ],
+    knowledge: [
+      {
+        id: uuid(),
+        title: 'Company Brand Guidelines',
+        content: '# Brand Guidelines\n\n## Voice & Tone\n- Professional yet approachable\n- Clear and concise\n- Technically accurate\n\n## Values\n- Innovation first\n- User-centric design\n- Transparency in all communications',
+        tags: ['brand', 'guidelines'],
+        createdAt: now(),
+        updatedAt: now()
+      },
+      {
+        id: uuid(),
+        title: 'Code Standards',
+        content: '# Code Standards\n\n## TypeScript\n- Use strict mode\n- Prefer interfaces over types\n- No `any` types\n\n## React\n- Functional components only\n- Use hooks for state\n- Keep components small and focused',
+        tags: ['code', 'standards', 'engineering'],
+        createdAt: now(),
+        updatedAt: now()
+      }
+    ],
+    conversations: []
+  }
+}
+
+function getActive(): CompanyData {
+  if (!companyData[activeCompanyId]) {
+    companyData[activeCompanyId] = { employees: [], knowledge: [], conversations: [], departments: [] }
+  }
+  return companyData[activeCompanyId]
+}
 
 const defaultProviders = [
-  { id: 'openai', name: 'OpenAI', authMethod: 'api_key', apiKey: '', oauth: null, oauthSupported: true, oauthClientId: '', oauthAuthUrl: '', oauthTokenUrl: '', oauthScopes: [], models: ['gpt-4o', 'gpt-4o-mini', 'o1', 'o1-mini'], enabled: true },
-  { id: 'anthropic', name: 'Anthropic', authMethod: 'api_key', apiKey: '', oauth: null, oauthSupported: true, oauthClientId: '', oauthAuthUrl: '', oauthTokenUrl: '', oauthScopes: [], models: ['claude-opus-4-20250514', 'claude-sonnet-4-20250514', 'claude-haiku-4-5-20251001'], enabled: true },
-  { id: 'google', name: 'Google', authMethod: 'api_key', apiKey: '', oauth: null, oauthSupported: true, oauthClientId: '', oauthAuthUrl: '', oauthTokenUrl: '', oauthScopes: [], models: ['gemini-2.5-pro', 'gemini-2.5-flash'], enabled: false },
-  { id: 'mistral', name: 'Mistral', authMethod: 'api_key', apiKey: '', oauth: null, oauthSupported: false, models: ['mistral-large-latest', 'mistral-small-latest'], enabled: false },
-  { id: 'ollama', name: 'Ollama (Local)', authMethod: 'api_key', apiKey: '', oauth: null, oauthSupported: false, baseUrl: 'http://localhost:11434', models: ['llama3', 'mistral', 'codellama'], enabled: false }
+  { id: 'vercel-ai-gateway', name: 'Vercel AI Gateway', apiKey: '', baseUrl: 'https://ai-gateway.vercel.sh/v1', models: [
+    'anthropic/claude-opus-4.6', 'anthropic/claude-sonnet-4.6', 'anthropic/claude-haiku-4.5', 'anthropic/claude-sonnet-4.5', 'anthropic/claude-opus-4.5', 'anthropic/claude-opus-4.1', 'anthropic/claude-sonnet-4', 'anthropic/claude-opus-4',
+    'openai/gpt-5.4', 'openai/gpt-5.4-mini', 'openai/gpt-5.3-codex', 'openai/gpt-5.2', 'openai/gpt-5', 'openai/gpt-5-mini', 'openai/gpt-4.1', 'openai/gpt-4.1-mini', 'openai/gpt-4o', 'openai/gpt-4o-mini', 'openai/o3', 'openai/o3-mini',
+    'google/gemini-3-pro', 'google/gemini-3-flash', 'google/gemini-2.5-pro', 'google/gemini-2.5-flash', 'google/gemini-2.5-flash-lite', 'google/gemini-2.0-flash',
+    'xai/grok-4.1-fast-reasoning', 'xai/grok-4.1-fast-non-reasoning', 'xai/grok-4-fast-reasoning', 'xai/grok-3', 'xai/grok-code-fast-1',
+    'deepseek/deepseek-v3.2', 'deepseek/deepseek-v3.2-thinking', 'deepseek/deepseek-v3', 'deepseek/deepseek-r1',
+    'mistral/mistral-large-3', 'mistral/mistral-medium-3.1', 'mistral/mistral-small-3', 'mistral/codestral',
+    'meta/llama-4-maverick', 'meta/llama-3.3-70b', 'meta/llama-3.1-70b', 'meta/llama-3.1-8b',
+    'alibaba/qwen3-max', 'alibaba/qwen3-pro', 'alibaba/qwen-2.5-72b',
+    'minimax/minimax-m2.7', 'minimax/minimax-m2.5'
+  ], enabled: false },
+  { id: 'openai', name: 'OpenAI', apiKey: '', models: ['gpt-4o', 'gpt-4o-mini', 'o1', 'o1-mini'], enabled: true },
+  { id: 'anthropic', name: 'Anthropic', apiKey: '', models: ['claude-opus-4-20250514', 'claude-sonnet-4-20250514', 'claude-haiku-4-5-20251001'], enabled: true },
+  { id: 'google', name: 'Google', apiKey: '', models: ['gemini-2.5-pro', 'gemini-2.5-flash'], enabled: false },
+  { id: 'mistral', name: 'Mistral', apiKey: '', models: ['mistral-large-latest', 'mistral-small-latest'], enabled: false },
+  { id: 'ollama-cloud', name: 'Ollama Cloud', apiKey: '', baseUrl: 'https://ollama.com/api', models: ['deepseek-v3.1:671b', 'qwen3-coder:480b', 'qwen3.5:122b', 'gpt-oss:120b', 'gpt-oss:20b', 'glm-5', 'nemotron-3-super:120b', 'devstral:123b'], enabled: false },
+  { id: 'ollama', name: 'Ollama (Local)', apiKey: '', baseUrl: 'http://localhost:11434', models: ['llama3', 'mistral', 'codellama'], enabled: false }
 ]
 
 let settings = { providers: defaultProviders, defaultProvider: 'openai', defaultModel: 'gpt-4o', theme: 'dark' as const }
@@ -129,47 +215,118 @@ export function installMockApi() {
   if (window.api) return // Real Electron API exists
 
   const mockApi = {
+    companies: {
+      list: async () => companies,
+      getActive: async () => activeCompanyId,
+      setActive: async (id: string) => { activeCompanyId = id },
+      create: async (data: { name: string; avatar: string }) => {
+        const company: Company = { ...data, id: uuid(), createdAt: now(), updatedAt: now() }
+        companies.push(company)
+        companyData[company.id] = { employees: [], knowledge: [], conversations: [], departments: [] }
+        return company
+      },
+      update: async (id: string, data: Partial<Company>) => {
+        companies = companies.map(c => c.id === id ? { ...c, ...data, updatedAt: now() } : c)
+        return companies.find(c => c.id === id)
+      },
+      delete: async (id: string) => {
+        if (companies.length <= 1) return false
+        companies = companies.filter(c => c.id !== id)
+        delete companyData[id]
+        if (activeCompanyId === id) activeCompanyId = companies[0]?.id || ''
+        return true
+      }
+    },
+    departments: {
+      list: async () => getActive().departments,
+      create: async (data: { name: string; color: string }) => {
+        const dept: Department = { ...data, id: uuid(), createdAt: now(), updatedAt: now() }
+        getActive().departments.push(dept)
+        return dept
+      },
+      update: async (id: string, data: Partial<Department>) => {
+        const active = getActive()
+        active.departments = active.departments.map(d => d.id === id ? { ...d, ...data, updatedAt: now() } : d)
+        return active.departments.find(d => d.id === id)
+      },
+      delete: async (id: string) => {
+        const active = getActive()
+        active.departments = active.departments.filter(d => d.id !== id)
+        active.employees.forEach(e => { if (e.departmentId === id) e.departmentId = null })
+        return true
+      }
+    },
     employees: {
-      list: async () => employees,
-      get: async (id: string) => employees.find(e => e.id === id),
+      list: async () => getActive().employees.filter(e => e.status === 'active'),
+      listTerminated: async () => getActive().employees.filter(e => e.status === 'terminated'),
+      get: async (id: string) => getActive().employees.find(e => e.id === id),
       create: async (data: Omit<Employee, 'id' | 'createdAt' | 'updatedAt'>) => {
-        const emp = { ...data, id: uuid(), createdAt: now(), updatedAt: now() } as Employee
-        employees.push(emp)
+        const emp = {
+          ...data,
+          departmentId: data.departmentId ?? null,
+          status: data.status ?? 'active' as const,
+          terminatedAt: data.terminatedAt ?? null,
+          id: uuid(),
+          createdAt: now(),
+          updatedAt: now()
+        } as Employee
+        getActive().employees.push(emp)
         return emp
       },
       update: async (id: string, data: Partial<Employee>) => {
-        employees = employees.map(e => e.id === id ? { ...e, ...data, updatedAt: now() } : e)
-        return employees.find(e => e.id === id)
+        const active = getActive()
+        active.employees = active.employees.map(e => e.id === id ? { ...e, ...data, updatedAt: now() } : e)
+        return active.employees.find(e => e.id === id)
       },
-      delete: async (id: string) => { employees = employees.filter(e => e.id !== id); return true }
+      delete: async (id: string) => { getActive().employees = getActive().employees.filter(e => e.id !== id); return true },
+      fire: async (id: string) => {
+        const active = getActive()
+        active.employees = active.employees.map(e =>
+          e.id === id ? { ...e, status: 'terminated' as const, terminatedAt: now(), updatedAt: now() } : e
+        )
+        return active.employees.find(e => e.id === id)
+      },
+      rehire: async (id: string) => {
+        const active = getActive()
+        active.employees = active.employees.map(e =>
+          e.id === id ? { ...e, status: 'active' as const, terminatedAt: null, updatedAt: now() } : e
+        )
+        return active.employees.find(e => e.id === id)
+      }
     },
     knowledge: {
-      list: async () => knowledge,
+      list: async () => getActive().knowledge,
       create: async (data: Omit<KnowledgeDocument, 'id' | 'createdAt' | 'updatedAt'>) => {
         const doc = { ...data, id: uuid(), createdAt: now(), updatedAt: now() } as KnowledgeDocument
-        knowledge.push(doc)
+        getActive().knowledge.push(doc)
         return doc
       },
       update: async (id: string, data: Partial<KnowledgeDocument>) => {
-        knowledge = knowledge.map(k => k.id === id ? { ...k, ...data, updatedAt: now() } : k)
-        return knowledge.find(k => k.id === id)
+        const active = getActive()
+        active.knowledge = active.knowledge.map(k => k.id === id ? { ...k, ...data, updatedAt: now() } : k)
+        return active.knowledge.find(k => k.id === id)
       },
-      delete: async (id: string) => { knowledge = knowledge.filter(k => k.id !== id); return true }
+      delete: async (id: string) => { getActive().knowledge = getActive().knowledge.filter(k => k.id !== id); return true }
     },
     conversations: {
-      list: async (employeeId: string) => conversations.filter(c => c.employeeId === employeeId),
-      get: async (id: string) => conversations.find(c => c.id === id),
+      list: async (employeeId: string) => getActive().conversations.filter(c => c.employeeId === employeeId),
+      get: async (id: string) => getActive().conversations.find(c => c.id === id),
       create: async (employeeId: string) => {
         const conv: Conversation = { id: uuid(), employeeId, title: 'New conversation', messages: [], createdAt: now(), updatedAt: now() }
-        conversations.push(conv)
+        getActive().conversations.push(conv)
         return conv
+      },
+      delete: async (id: string) => {
+        const data = getActive()
+        data.conversations = data.conversations.filter(c => c.id !== id)
       }
     },
     chat: {
       send: async (conversationId: string, message: string) => {
-        const conv = conversations.find(c => c.id === conversationId)
+        const active = getActive()
+        const conv = active.conversations.find(c => c.id === conversationId)
         if (!conv) return
-        const emp = employees.find(e => e.id === conv.employeeId)
+        const emp = active.employees.find(e => e.id === conv.employeeId)
         conv.messages.push({ id: uuid(), role: 'user', content: message, timestamp: now() })
         if (conv.messages.length === 1) conv.title = message.slice(0, 60)
         const reply = `Hey! I'm **${emp?.name || 'your employee'}**, and I received your message. Once the agent backend is connected with a real API key, I'll be fully operational.\n\nFor now, head to **Settings** to configure a provider.`
@@ -182,12 +339,6 @@ export function installMockApi() {
     settings: {
       get: async () => settings,
       update: async (s: Partial<typeof settings>) => { settings = { ...settings, ...s }; return settings }
-    },
-    oauth: {
-      start: async () => ({ state: 'mock', redirectUri: 'mock' }),
-      exchange: async () => ({}),
-      disconnect: async () => {},
-      onCallback: () => () => {}
     }
   }
 

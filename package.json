@@ -1,10 +1,10 @@
 {
   "name": "prometheus",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Your personal AI workforce — create, manage, and orchestrate intelligent employees that work together",
   "main": "./out/main/index.js",
   "scripts": {
-    "dev": "electron-vite dev",
+    "dev": "unset ELECTRON_RUN_AS_NODE && electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "dev:web": "vite --config vite.web.config.ts",
@@ -25,7 +25,7 @@
     "@types/uuid": "^10.0.0",
     "@vitejs/plugin-react": "^6.0.1",
     "autoprefixer": "^10.4.27",
-    "electron": "^41.0.3",
+    "electron": "^35.7.5",
     "electron-vite": "^5.0.0",
     "postcss": "^8.5.8",
     "tailwindcss": "^4.2.2",

@@ -2,14 +2,17 @@ import { type HTMLAttributes, forwardRef } from 'react'
 import { cn } from '@/lib/utils'
 
 const Card = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement>>(
-  ({ className, ...props }, ref) => (
+  ({ className, style, ...props }, ref) => (
     <div
       ref={ref}
       className={cn(
-        'rounded-xl border border-border-subtle bg-bg-secondary p-6',
-        'transition-all duration-200',
+        'relative rounded-2xl',
+        'bg-bg-elevated border border-border-default',
+        'transition-all duration-400 ease-out',
+        'hover:bg-bg-surface hover:border-border-bright',
         className
       )}
+      style={{ padding: '28px', ...style }}
       {...props}
     />
   )
@@ -17,22 +20,22 @@ const Card = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement>>(
 Card.displayName = 'Card'
 
 const CardHeader = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement>>(
-  ({ className, ...props }, ref) => (
-    <div ref={ref} className={cn('flex flex-col gap-1.5 pb-4', className)} {...props} />
+  ({ className, style, ...props }, ref) => (
+    <div ref={ref} className={cn('flex flex-col', className)} style={{ gap: '8px', paddingBottom: '24px', ...style }} {...props} />
   )
 )
 CardHeader.displayName = 'CardHeader'
 
 const CardTitle = forwardRef<HTMLHeadingElement, HTMLAttributes<HTMLHeadingElement>>(
   ({ className, ...props }, ref) => (
-    <h3 ref={ref} className={cn('text-lg font-semibold text-text-primary', className)} {...props} />
+    <h3 ref={ref} className={cn('text-[15px] font-semibold text-text-primary tracking-tight', className)} {...props} />
   )
 )
 CardTitle.displayName = 'CardTitle'
 
 const CardDescription = forwardRef<HTMLParagraphElement, HTMLAttributes<HTMLParagraphElement>>(
   ({ className, ...props }, ref) => (
-    <p ref={ref} className={cn('text-sm text-text-tertiary', className)} {...props} />
+    <p ref={ref} className={cn('text-[13px] text-text-tertiary leading-relaxed', className)} {...props} />
   )
 )
 CardDescription.displayName = 'CardDescription'

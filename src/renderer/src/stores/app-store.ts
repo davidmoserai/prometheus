@@ -1,5 +1,27 @@
 import { create } from 'zustand'
 
+interface Company {
+  id: string
+  name: string
+  avatar: string
+  createdAt: string
+  updatedAt: string
+}
+
+interface Department {
+  id: string
+  name: string
+  color: string
+  createdAt: string
+  updatedAt: string
+}
+
+interface ContactAccess {
+  mode: 'none' | 'specific' | 'all'
+  allowedEmployeeIds: string[]
+  allowedDepartmentIds: string[]
+}
+
 interface Employee {
   id: string
   name: string
@@ -11,6 +33,9 @@ interface Employee {
   provider: string
   model: string
   permissions: PermissionSet
+  departmentId: string | null
+  status: 'active' | 'terminated'
+  terminatedAt: string | null
   createdAt: string
   updatedAt: string
 }
@@ -28,7 +53,7 @@ interface PermissionSet {
   canReadFiles: boolean
   canWriteFiles: boolean
   canExecuteCode: boolean
-  canContactEmployees: boolean
+  contactAccess: ContactAccess
   autoApproveAll: boolean
 }
 
@@ -59,26 +84,10 @@ interface ChatMessage {
   handoffFrom?: string
 }
 
-type AuthMethod = 'api_key' | 'oauth'
-
-interface OAuthState {
-  accessToken: string
-  refreshToken: string
-  expiresAt: string
-  scope: string
-}
-
 interface ProviderConfig {
   id: string
   name: string
-  authMethod: AuthMethod
   apiKey: string
-  oauth: OAuthState | null
-  oauthSupported: boolean
-  oauthClientId?: string
-  oauthAuthUrl?: string
-  oauthTokenUrl?: string
-  oauthScopes?: string[]
   baseUrl?: string
   models: string[]
   enabled: boolean
@@ -92,8 +101,14 @@ interface AppSettings {
 }
 
 interface AppState {
-  // Data
+  // Company data
+  companies: Company[]
+  activeCompanyId: string | null
+
+  // Scoped data
   employees: Employee[]
+  terminatedEmployees: Employee[]
+  departments: Department[]
   knowledge: KnowledgeDocument[]
   conversations: Conversation[]
   settings: AppSettings | null
@@ -106,9 +121,12 @@ interface AppState {
   editingEmployeeId: string | null
   streamingContent: Record<string, string>
   isLoading: boolean
+  sidebarCollapsed: boolean
 
-  // Actions
+  // Actions — UI
   setActiveView: (view: AppState['activeView']) => void
+  setSidebarCollapsed: (collapsed: boolean) => void
+  toggleSidebar: () => void
   setSelectedEmployee: (id: string | null) => void
   setSelectedConversation: (id: string | null) => void
   setCreatingEmployee: (creating: boolean) => void
@@ -116,24 +134,51 @@ interface AppState {
   setStreamingContent: (convId: string, content: string) => void
   clearStreamingContent: (convId: string) => void
 
-  // Data actions
+  // Actions — Companies
+  loadCompanies: () => Promise<void>
+  createCompany: (data: { name: string; avatar: string }) => Promise<Company>
+  updateCompany: (id: string, data: Partial<Company>) => Promise<void>
+  deleteCompany: (id: string) => Promise<void>
+  switchCompany: (id: string) => Promise<void>
+
+  // Actions — Departments
+  loadDepartments: () => Promise<void>
+  createDepartment: (data: { name: string; color: string }) => Promise<Department>
+  updateDepartment: (id: string, data: Partial<Department>) => Promise<void>
+  deleteDepartment: (id: string) => Promise<void>
+
+  // Actions — Employees
   loadEmployees: () => Promise<void>
-  loadKnowledge: () => Promise<void>
-  loadConversations: (employeeId: string) => Promise<void>
-  loadSettings: () => Promise<void>
+  loadTerminatedEmployees: () => Promise<void>
   createEmployee: (data: Omit<Employee, 'id' | 'createdAt' | 'updatedAt'>) => Promise<Employee>
   updateEmployee: (id: string, data: Partial<Employee>) => Promise<void>
   deleteEmployee: (id: string) => Promise<void>
+  fireEmployee: (id: string) => Promise<void>
+  rehireEmployee: (id: string) => Promise<void>
+
+  // Actions — Knowledge
+  loadKnowledge: () => Promise<void>
   createKnowledge: (data: Omit<KnowledgeDocument, 'id' | 'createdAt' | 'updatedAt'>) => Promise<KnowledgeDocument>
   updateKnowledge: (id: string, data: Partial<KnowledgeDocument>) => Promise<void>
   deleteKnowledge: (id: string) => Promise<void>
+
+  // Actions — Conversations & Chat
+  loadConversations: (employeeId: string) => Promise<void>
   createConversation: (employeeId: string) => Promise<Conversation>
+  deleteConversation: (conversationId: string) => Promise<void>
   sendMessage: (conversationId: string, message: string) => Promise<void>
+
+  // Actions — Settings
+  loadSettings: () => Promise<void>
   updateSettings: (settings: Partial<AppSettings>) => Promise<void>
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
+  companies: [],
+  activeCompanyId: null,
   employees: [],
+  terminatedEmployees: [],
+  departments: [],
   knowledge: [],
   conversations: [],
   settings: null,
@@ -144,8 +189,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   editingEmployeeId: null,
   streamingContent: {},
   isLoading: false,
+  sidebarCollapsed: false,
 
+  // UI setters
   setActiveView: (view) => set({ activeView: view }),
+  setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
+  toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
   setSelectedEmployee: (id) => set({ selectedEmployeeId: id }),
   setSelectedConversation: (id) => set({ selectedConversationId: id }),
   setCreatingEmployee: (creating) => set({ isCreatingEmployee: creating }),
@@ -160,24 +209,79 @@ export const useAppStore = create<AppState>((set, get) => ({
       return { streamingContent: rest }
     }),
 
+  // Companies
+  loadCompanies: async () => {
+    const companies = await window.api.companies.list()
+    const activeCompanyId = await window.api.companies.getActive()
+    set({ companies, activeCompanyId })
+  },
+
+  createCompany: async (data) => {
+    const company = await window.api.companies.create(data)
+    await get().loadCompanies()
+    return company
+  },
+
+  updateCompany: async (id, data) => {
+    await window.api.companies.update(id, data)
+    await get().loadCompanies()
+  },
+
+  deleteCompany: async (id) => {
+    await window.api.companies.delete(id)
+    await get().loadCompanies()
+    // Reload scoped data for new active company
+    await get().loadEmployees()
+    await get().loadTerminatedEmployees()
+    await get().loadDepartments()
+    await get().loadKnowledge()
+  },
+
+  switchCompany: async (id) => {
+    await window.api.companies.setActive(id)
+    set({ activeCompanyId: id, selectedEmployeeId: null, selectedConversationId: null, conversations: [] })
+    // Reload all scoped data
+    await Promise.all([
+      get().loadEmployees(),
+      get().loadTerminatedEmployees(),
+      get().loadDepartments(),
+      get().loadKnowledge()
+    ])
+  },
+
+  // Departments
+  loadDepartments: async () => {
+    const departments = await window.api.departments.list()
+    set({ departments })
+  },
+
+  createDepartment: async (data) => {
+    const dept = await window.api.departments.create(data)
+    await get().loadDepartments()
+    return dept
+  },
+
+  updateDepartment: async (id, data) => {
+    await window.api.departments.update(id, data)
+    await get().loadDepartments()
+  },
+
+  deleteDepartment: async (id) => {
+    await window.api.departments.delete(id)
+    await get().loadDepartments()
+    // Reload employees since departmentId may have been cleared
+    await get().loadEmployees()
+  },
+
+  // Employees
   loadEmployees: async () => {
     const employees = await window.api.employees.list()
     set({ employees })
   },
 
-  loadKnowledge: async () => {
-    const knowledge = await window.api.knowledge.list()
-    set({ knowledge })
-  },
-
-  loadConversations: async (employeeId: string) => {
-    const conversations = await window.api.conversations.list(employeeId)
-    set({ conversations })
-  },
-
-  loadSettings: async () => {
-    const settings = await window.api.settings.get()
-    set({ settings })
+  loadTerminatedEmployees: async () => {
+    const terminatedEmployees = await window.api.employees.listTerminated()
+    set({ terminatedEmployees })
   },
 
   createEmployee: async (data) => {
@@ -199,6 +303,27 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
+  fireEmployee: async (id) => {
+    await window.api.employees.fire(id)
+    await get().loadEmployees()
+    await get().loadTerminatedEmployees()
+    if (get().selectedEmployeeId === id) {
+      set({ selectedEmployeeId: null })
+    }
+  },
+
+  rehireEmployee: async (id) => {
+    await window.api.employees.rehire(id)
+    await get().loadEmployees()
+    await get().loadTerminatedEmployees()
+  },
+
+  // Knowledge
+  loadKnowledge: async () => {
+    const knowledge = await window.api.knowledge.list()
+    set({ knowledge })
+  },
+
   createKnowledge: async (data) => {
     const doc = await window.api.knowledge.create(data)
     await get().loadKnowledge()
@@ -215,11 +340,28 @@ export const useAppStore = create<AppState>((set, get) => ({
     await get().loadKnowledge()
   },
 
+  // Conversations
+  loadConversations: async (employeeId: string) => {
+    const conversations = await window.api.conversations.list(employeeId)
+    set({ conversations })
+  },
+
   createConversation: async (employeeId: string) => {
     const conv = await window.api.conversations.create(employeeId)
     await get().loadConversations(employeeId)
     set({ selectedConversationId: conv.id })
     return conv
+  },
+
+  deleteConversation: async (conversationId: string) => {
+    await window.api.conversations.delete(conversationId)
+    const { selectedConversationId, selectedEmployeeId } = get()
+    if (selectedConversationId === conversationId) {
+      set({ selectedConversationId: null })
+    }
+    if (selectedEmployeeId) {
+      await get().loadConversations(selectedEmployeeId)
+    }
   },
 
   sendMessage: async (conversationId, message) => {
@@ -235,10 +377,16 @@ export const useAppStore = create<AppState>((set, get) => ({
     get().clearStreamingContent(conversationId)
   },
 
+  // Settings
+  loadSettings: async () => {
+    const settings = await window.api.settings.get()
+    set({ settings })
+  },
+
   updateSettings: async (settings) => {
     await window.api.settings.update(settings)
     await get().loadSettings()
   }
 }))
 
-export type { Employee, KnowledgeDocument, Conversation, ChatMessage, AppSettings, ProviderConfig, ToolAssignment, PermissionSet, AuthMethod, OAuthState }
+export type { Company, Department, ContactAccess, Employee, KnowledgeDocument, Conversation, ChatMessage, AppSettings, ProviderConfig, ToolAssignment, PermissionSet }
