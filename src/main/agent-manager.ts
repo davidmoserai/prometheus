@@ -491,10 +491,57 @@ export class AgentManager {
       onStream(accumulated)
     }
 
-    // Strip any leaked XML tool call markup from the response
+    // Check if model output XML tool calls instead of using API tool calling
+    const xmlToolMatch = accumulated.match(/<function_calls>\s*<invoke name="(\w+)">([\s\S]*?)<\/invoke>\s*<\/function_calls>/)
+    if (xmlToolMatch && tools) {
+      const toolName = xmlToolMatch[1]
+      const paramsBlock = xmlToolMatch[2]
+
+      // Parse parameters from XML
+      const params: Record<string, string> = {}
+      const paramRegex = /<parameter name="(\w+)"[^>]*>([\s\S]*?)<\/parameter>/g
+      let paramMatch
+      while ((paramMatch = paramRegex.exec(paramsBlock)) !== null) {
+        params[paramMatch[1]] = paramMatch[2].trim()
+      }
+
+      // Execute the tool if it exists
+      const tool = tools[toolName]
+      if (tool) {
+        try {
+          const toolResult = await (tool as { execute: (input: Record<string, string>) => Promise<{ result: string }> }).execute(params)
+          const resultText = typeof toolResult === 'object' && toolResult.result ? toolResult.result : String(toolResult)
+
+          // Strip the XML from accumulated text
+          const textBeforeXml = accumulated.substring(0, accumulated.indexOf('<function_calls>')).trim()
+          const textAfterXml = accumulated.substring(accumulated.indexOf('</function_calls>') + '</function_calls>'.length).trim()
+          const cleanedText = [textBeforeXml, `[Tool: ${toolName}]`, textAfterXml].filter(Boolean).join('\n')
+
+          // Re-run the agent with the tool result to get a final response
+          const followUp = await streamFn([
+            ...messages,
+            { role: 'assistant', content: accumulated },
+            { role: 'user', content: `Tool "${toolName}" returned: ${resultText.slice(0, 3000)}` }
+          ])
+
+          let followUpText = ''
+          for await (const chunk of followUp.textStream) {
+            followUpText += chunk
+            onStream(cleanedText + '\n' + followUpText)
+          }
+
+          return followUpText || cleanedText
+        } catch (err) {
+          // Tool execution failed — return what we have
+          const errorMsg = err instanceof Error ? err.message : 'Unknown error'
+          return accumulated.replace(/<function_calls>[\s\S]*?<\/function_calls>/g, `[Tool ${toolName} failed: ${errorMsg}]`).trim()
+        }
+      }
+    }
+
+    // Strip any remaining XML tool call markup
     const cleaned = accumulated
       .replace(/<function_calls>[\s\S]*?<\/function_calls>/g, '')
-      .replace(/<function_calls>[\s\S]*?<\/antml:function_calls>/g, '')
       .replace(/<invoke[\s\S]*?<\/invoke>/g, '')
       .trim()
 
