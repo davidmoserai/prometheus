@@ -179,7 +179,7 @@ export const DEFAULT_PROVIDERS: ProviderConfig[] = [
       'openai/o3',
       'openai/o3-mini',
       // Google
-      'google/gemini-3-pro',
+      'google/gemini-3-pro-preview',
       'google/gemini-3-flash',
       'google/gemini-2.5-pro',
       'google/gemini-2.5-flash',
@@ -197,9 +197,8 @@ export const DEFAULT_PROVIDERS: ProviderConfig[] = [
       'deepseek/deepseek-v3',
       'deepseek/deepseek-r1',
       // Mistral
-      'mistral/mistral-large-3',
-      'mistral/mistral-medium-3.1',
-      'mistral/mistral-small-3',
+      'mistral/mistral-medium',
+      'mistral/mistral-small',
       'mistral/codestral',
       // Meta
       'meta/llama-4-maverick',
@@ -208,8 +207,6 @@ export const DEFAULT_PROVIDERS: ProviderConfig[] = [
       'meta/llama-3.1-8b',
       // Alibaba / Qwen
       'alibaba/qwen3-max',
-      'alibaba/qwen3-pro',
-      'alibaba/qwen-2.5-72b',
       // Minimax
       'minimax/minimax-m2.7',
       'minimax/minimax-m2.5'
@@ -261,7 +258,6 @@ export const DEFAULT_PROVIDERS: ProviderConfig[] = [
       'glm-4.7',
       'nemotron-3-super',
       'devstral-2:123b',
-      'cogito-2.1:671b',
       'minimax-m2.7',
       'minimax-m2.5',
       'kimi-k2.5',

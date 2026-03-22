@@ -913,13 +913,18 @@ export class AgentManager {
     const contactable = this.getContactableEmployees(employee)
     if (contactable.length > 0) {
       const departments = this.store.listDepartments()
-      prompt += '\n\n## Your Team\nYou can delegate tasks to these team members:\n'
+      const allKnowledge = this.store.listKnowledge()
+      prompt += '\n\n## Your Team\nYou can delegate tasks to or message these team members:\n'
       for (const e of contactable) {
         const dept = departments.find(d => d.id === e.departmentId)
         const deptLabel = dept ? ` — ${dept.name}` : ''
+        const enabledTools = e.tools.filter(t => t.enabled).map(t => t.name)
+        const knowledgeDocs = e.knowledgeIds.map(id => allKnowledge.find(k => k.id === id)?.title).filter(Boolean)
         prompt += `- ${e.name} (${e.role}${deptLabel}) [ID: ${e.id}]\n`
+        if (enabledTools.length > 0) prompt += `  Tools: ${enabledTools.join(', ')}\n`
+        if (knowledgeDocs.length > 0) prompt += `  Knowledge: ${knowledgeDocs.join(', ')}\n`
       }
-      prompt += '\nUse delegate_task for formal work assignments. Use message_employee for quick questions, clarifications, or lightweight collaboration.'
+      prompt += '\nUse delegate_task for formal work assignments. Use message_employee for quick questions, clarifications, or collaboration.'
     }
 
     // Memory and knowledge instructions
