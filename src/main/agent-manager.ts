@@ -57,14 +57,14 @@ function buildModelRef(provider: ProviderConfig, model: string): MastraModel {
 
     case 'ollama':
       return {
-        id: `ollama/${model}`,
+        id: model,
         url: (provider.baseUrl || 'http://localhost:11434') + '/v1',
         apiKey: 'not-needed'
       }
 
     case 'ollama-cloud':
       return {
-        id: `ollama-cloud/${model}`,
+        id: model,
         url: (provider.baseUrl || 'https://ollama.com/api').replace(/\/api$/, '') + '/v1',
         apiKey: provider.apiKey
       }
