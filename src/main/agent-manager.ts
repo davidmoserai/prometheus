@@ -478,7 +478,7 @@ export class AgentManager {
       instructions: systemPrompt,
       model: modelRef,
       tools: tools || {},
-      maxSteps: 10
+      maxSteps: 5
     })
 
     // Stream the response and accumulate text for the onStream callback
@@ -754,6 +754,9 @@ export class AgentManager {
       // Log tool calls to task thread
       (data) => {
         this.store.addTaskMessage(task.id, { role: 'tool', content: `${data.tool}: ${data.summary}` })
+        // Notify frontend in real-time so activity thread updates live
+        const current = this.store.getTask(task.id)
+        if (current) this.onTaskUpdate?.(current)
       },
       this.onFileWritten
     )
@@ -840,9 +843,11 @@ export class AgentManager {
       contactable,
       (fromEmp, args, convId) => this.handleDelegateTask(fromEmp, args, convId),
       (fromEmp, toId, msg) => this.executeAgentMessage(fromEmp, toId, msg),
-      // Log tool calls to task thread
+      // Log tool calls to task thread + notify frontend in real-time
       (data) => {
         this.store.addTaskMessage(taskId, { role: 'tool', content: `${data.tool}: ${data.summary}` })
+        const current = this.store.getTask(taskId)
+        if (current) this.onTaskUpdate?.(current)
       },
       this.onFileWritten
     )
