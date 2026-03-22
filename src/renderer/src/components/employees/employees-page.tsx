@@ -311,10 +311,10 @@ function EmployeeCard({
             )}
             <Badge variant="secondary">{employee.provider}</Badge>
             <Badge variant={activeTools > 0 ? 'default' : 'secondary'}>
-              {activeTools} tools
+              {activeTools} {activeTools === 1 ? 'tool' : 'tools'}
             </Badge>
             {employee.knowledgeIds.length > 0 && (
-              <Badge variant="success">{employee.knowledgeIds.length} docs</Badge>
+              <Badge variant="success">{employee.knowledgeIds.length} {employee.knowledgeIds.length === 1 ? 'doc' : 'docs'}</Badge>
             )}
           </div>
         </div>

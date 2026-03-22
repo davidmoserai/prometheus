@@ -180,7 +180,7 @@ export function Dashboard() {
                       </Badge>
                     )}
                     <Badge variant="secondary">
-                      {employee.tools.filter(t => t.enabled).length} tools
+                      {employee.tools.filter(t => t.enabled).length} {employee.tools.filter(t => t.enabled).length === 1 ? 'tool' : 'tools'}
                     </Badge>
                     <ArrowRight className="w-4 h-4 text-text-tertiary opacity-0 group-hover:opacity-100 group-hover:translate-x-1 transition-all duration-300" />
                   </button>

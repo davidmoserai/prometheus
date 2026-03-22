@@ -35,6 +35,8 @@ export function ChatPage() {
   const [isSending, setIsSending] = useState(false)
   const [tokenCount, setTokenCount] = useState(0)
   const [isCompressing, setIsCompressing] = useState(false)
+  const [isUserScrolledUp, setIsUserScrolledUp] = useState(false)
+  const messagesContainerRef = useRef<HTMLDivElement>(null)
   const [writtenFiles, setWrittenFiles] = useState<{ path: string; content: string }[]>([])
   const [stagedAttachments, setStagedAttachments] = useState<ChatAttachment[]>([])
   const [toolCallNotices, setToolCallNotices] = useState<ToolCallNotice[]>([])
@@ -52,9 +54,25 @@ export function ChatPage() {
     }
   }, [selectedEmployeeId, loadConversations])
 
+  // Auto-scroll to bottom only if user hasn't scrolled up
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [activeConversation?.messages, currentStreaming, toolCallNotices])
+    if (!isUserScrolledUp) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }
+  }, [activeConversation?.messages, currentStreaming, toolCallNotices, isUserScrolledUp])
+
+  // Reset scroll lock when conversation changes or sending completes
+  useEffect(() => {
+    setIsUserScrolledUp(false)
+  }, [selectedConversationId])
+
+  // Detect if user scrolled up
+  const handleMessagesScroll = () => {
+    const container = messagesContainerRef.current
+    if (!container) return
+    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
+    setIsUserScrolledUp(distanceFromBottom > 100)
+  }
 
   // Update token count when conversation changes
   useEffect(() => {
@@ -381,7 +399,7 @@ export function ChatPage() {
             </div>
 
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto flex flex-col" style={{ paddingLeft: '32px', paddingRight: '32px', paddingTop: '24px', paddingBottom: '24px', gap: '20px' }}>
+            <div ref={messagesContainerRef} onScroll={handleMessagesScroll} className="flex-1 overflow-y-auto flex flex-col" style={{ paddingLeft: '32px', paddingRight: '32px', paddingTop: '24px', paddingBottom: '24px', gap: '20px' }}>
               {activeConversation.messages.map((msg) => (
                 <MessageBubble key={msg.id} message={msg} employeeName={selectedEmployee?.name} employeeAvatar={selectedEmployee?.avatar} />
               ))}
@@ -396,6 +414,26 @@ export function ChatPage() {
                   <span className="text-[12px] text-text-tertiary">{notice.summary}</span>
                 </div>
               ))}
+              {/* Thinking indicator — shows when waiting for response */}
+              {isSending && !currentStreaming && (
+                <div className="flex animate-fade-in" style={{ gap: '14px' }}>
+                  <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-bg-elevated text-sm shrink-0">
+                    {selectedEmployee?.avatar}
+                  </div>
+                  <div className="flex-1 max-w-2xl">
+                    <div className="rounded-2xl rounded-tl-lg bg-bg-elevated border border-border-default" style={{ padding: '12px 16px' }}>
+                      <div className="flex items-center" style={{ gap: '6px' }}>
+                        <div className="flex" style={{ gap: '4px' }}>
+                          <span className="w-2 h-2 rounded-full bg-text-tertiary" style={{ animation: 'pulse-dot 1.4s ease-in-out infinite', animationDelay: '0s' }} />
+                          <span className="w-2 h-2 rounded-full bg-text-tertiary" style={{ animation: 'pulse-dot 1.4s ease-in-out infinite', animationDelay: '0.2s' }} />
+                          <span className="w-2 h-2 rounded-full bg-text-tertiary" style={{ animation: 'pulse-dot 1.4s ease-in-out infinite', animationDelay: '0.4s' }} />
+                        </div>
+                        <span className="text-[13px] text-text-tertiary" style={{ marginLeft: '4px' }}>Thinking...</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
               {currentStreaming && currentStreaming.length > 0 && !activeConversation.messages.find(m => m.role === 'assistant' && m.content === currentStreaming) && (
                 <div className="flex animate-fade-in" style={{ gap: '14px' }}>
                   <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-bg-elevated text-sm shrink-0">
