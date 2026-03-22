@@ -50,10 +50,9 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-bg-primary">
+    <div className="flex bg-bg-primary" style={{ height: '100vh', overflow: 'hidden' }}>
       <Sidebar />
-      <main className="relative flex-1 overflow-hidden bg-bg-primary">
-        {/* Global ambient gradient mesh */}
+      <main className="relative flex-1" style={{ height: '100%', overflow: 'hidden' }}>
         <div className="absolute inset-0 gradient-mesh pointer-events-none" />
         <div className="relative h-full">
           {renderView()}

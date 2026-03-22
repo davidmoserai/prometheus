@@ -97,7 +97,7 @@ export function SettingsPage() {
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="relative max-w-[720px] mx-auto" style={{ padding: '48px' }}>
+      <div className="relative max-w-[720px] mx-auto" style={{ padding: '48px', paddingBottom: '120px' }}>
         {/* Ambient orbs */}
         <div className="ambient-orb ambient-orb-1" style={{ top: '-60px', right: '-100px' }} />
         <div className="ambient-orb ambient-orb-3" style={{ bottom: '100px', left: '-80px' }} />
