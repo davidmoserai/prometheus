@@ -75,13 +75,6 @@ function buildProviderOptions(provider: ProviderConfig, hasTools: boolean): Reco
         anthropic: { cacheControl: { type: 'ephemeral' } }
       }
     case 'ollama-cloud':
-      // DeepSeek thinking models can't use tool calling in thinking mode.
-      // Disable thinking when builtin tools (read_file, write_file, etc.) are active.
-      if (hasTools) {
-        return {
-          'openai-compatible': { reasoningEffort: 'none' }
-        }
-      }
       return undefined
     default:
       return undefined
