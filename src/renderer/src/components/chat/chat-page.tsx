@@ -220,7 +220,7 @@ export function ChatPage() {
                   </div>
                   <div className="flex-1 max-w-2xl">
                     <div className="rounded-2xl rounded-tl-lg bg-bg-elevated border border-border-default" style={{ padding: '12px 16px' }}>
-                      <div className="text-[14px] text-text-primary leading-relaxed prose prose-invert prose-sm max-w-none prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5 prose-code:bg-white/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-[13px] prose-pre:bg-black/30 prose-pre:rounded-lg">
+                      <div className="chat-markdown">
                         <ReactMarkdown>{currentStreaming}</ReactMarkdown>
                       </div>
                     </div>
@@ -320,7 +320,7 @@ function MessageBubble({
               ? 'bg-gradient-to-br from-flame-500 to-flame-600 text-white rounded-tr-lg shadow-[0_4px_20px_-4px_rgba(249,115,22,0.25)]'
               : 'bg-bg-elevated border border-border-default rounded-tl-lg'
           }`} style={{ padding: '12px 16px' }}>
-            <div className="text-[14px] leading-relaxed prose prose-invert prose-sm max-w-none prose-p:my-1 prose-headings:my-2 prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5 prose-code:bg-white/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-[13px] prose-pre:bg-black/30 prose-pre:rounded-lg">
+            <div className="chat-markdown">
               <ReactMarkdown>{message.content}</ReactMarkdown>
             </div>
           </div>
