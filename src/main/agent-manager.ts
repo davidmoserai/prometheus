@@ -132,7 +132,8 @@ function buildMastraTools(
       }),
       execute: async (input) => {
         const toEmp = store.getEmployee(input.to_employee_id)
-        onToolCall?.({ tool: 'delegate_task', summary: `Delegated task to ${toEmp?.name || 'employee'}: ${input.objective}` })
+        const briefDetail = `To: ${toEmp?.name || 'Unknown'} (${toEmp?.role || 'unknown role'})\nPriority: ${input.priority}\nDeadline: ${input.deadline || 'Not specified'}\n\nObjective:\n${input.objective}\n\nContext:\n${input.context}\n\nDeliverable:\n${input.deliverable}\n\nAcceptance Criteria:\n${input.acceptance_criteria}\n\nEscalate if:\n${input.escalate_if}`
+        onToolCall?.({ tool: 'delegate_task', summary: `Delegated task to ${toEmp?.name || 'employee'}: ${input.objective}`, detail: briefDetail })
         const { message } = onDelegateTask(employee, input as Record<string, string>, conversationId)
         return { result: message }
       }

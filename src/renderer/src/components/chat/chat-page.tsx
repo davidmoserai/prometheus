@@ -367,7 +367,7 @@ export function ChatPage() {
       </div>
 
       {/* Chat Area */}
-      <div className="flex-1 flex flex-col relative">
+      <div className="flex-1 flex flex-col relative" onDragOver={handleDragOver} onDrop={handleDrop}>
         {activeConversation ? (
           <>
             {/* Token counter header */}
@@ -539,9 +539,6 @@ export function ChatPage() {
 
             {/* Input */}
             <div
-              ref={dropZoneRef}
-              onDragOver={handleDragOver}
-              onDrop={handleDrop}
               style={{ paddingLeft: '32px', paddingRight: '32px', paddingTop: '20px', paddingBottom: '20px' }}
             >
               <div className="flex items-end max-w-3xl mx-auto" style={{ gap: '10px' }}>
@@ -619,7 +616,23 @@ function MessageBubble({
   employeeAvatar?: string
 }) {
   const isUser = message.role === 'user'
-  const imageAttachments = (message.attachments || []).filter(a => a.mimetype.startsWith('image/'))
+
+  // Extract file paths from inline markers and strip them from display
+  const attachmentPattern = /\[Attached: .+?\] \(path: (.+?)\)/g
+  const inlineFilePaths: string[] = []
+  let match
+  while ((match = attachmentPattern.exec(message.content)) !== null) {
+    inlineFilePaths.push(match[1])
+  }
+  const displayContent = message.content.replace(/\n?\[Attached: .+?\] \(path: .+?\)/g, '').trim()
+
+  // Combine structured attachments + inline parsed paths
+  const structuredImages = (message.attachments || []).filter(a => a.mimetype.startsWith('image/'))
+  const inlineImages = inlineFilePaths.filter(p => /\.(jpg|jpeg|png|gif|webp)$/i.test(p))
+  const allImagePaths = [
+    ...structuredImages.map(a => a.path),
+    ...inlineImages.filter(p => !structuredImages.some(a => a.path === p))
+  ]
 
   return (
     <div className={`flex animate-fade-in ${isUser ? 'flex-row-reverse' : ''}`} style={{ gap: '14px' }}>
@@ -640,18 +653,21 @@ function MessageBubble({
               ? 'bg-gradient-to-br from-flame-500 to-flame-600 text-white rounded-tr-lg shadow-[0_4px_20px_-4px_rgba(249,115,22,0.25)]'
               : 'bg-bg-elevated border border-border-default rounded-tl-lg'
           }`} style={{ padding: '12px 16px' }}>
-            <div className="chat-markdown">
-              <ReactMarkdown>{message.content}</ReactMarkdown>
-            </div>
+            {displayContent && (
+              <div className="chat-markdown">
+                <ReactMarkdown>{displayContent}</ReactMarkdown>
+              </div>
+            )}
             {/* Inline image attachments */}
-            {imageAttachments.length > 0 && (
-              <div className="flex flex-wrap" style={{ gap: '8px', marginTop: '10px' }}>
-                {imageAttachments.map((att) => (
+            {allImagePaths.length > 0 && (
+              <div className="flex flex-wrap" style={{ gap: '8px', marginTop: displayContent ? '10px' : '0' }}>
+                {allImagePaths.map((filePath, i) => (
                   <img
-                    key={att.id}
-                    src={`file://${att.path}`}
-                    alt={att.filename}
-                    className="rounded-lg border border-white/10 max-w-[240px] max-h-[200px] object-cover"
+                    key={i}
+                    src={`file://${filePath}`}
+                    alt=""
+                    className="rounded-lg border border-white/10"
+                    style={{ maxWidth: '240px', maxHeight: '200px', objectFit: 'cover' }}
                   />
                 ))}
               </div>
