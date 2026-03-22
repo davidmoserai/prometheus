@@ -1,46 +1,90 @@
-# Prometheus — AI Workforce Management Platform
+# Prometheus — Build AI Agent Teams That Actually Work Together
 
-**Create, manage, and orchestrate AI employees that work together.** Like having your own AI-powered company.
+**The open-source alternative to Claude Projects, ChatGPT, and OpenClaw.** Create AI agent teams with roles, shared knowledge, task delegation, and multi-provider support — all in a single desktop app.
 
-Prometheus is a desktop app that turns AI models into specialized employees with defined roles, tools, shared knowledge, and the ability to collaborate — replacing the fragmented experience of juggling multiple AI tools, browser tabs, and disconnected conversations.
+Prometheus is an AI agent platform for founders, operators, and power users who need more than a chatbot. Build specialized AI teams where each agent has a defined role, tools, and context — and they can delegate work to each other using structured task briefs.
+
+Think of it as **Claude Projects on steroids**: multiple providers, inter-agent collaboration, recurring tasks, tool execution, and your data never leaves your machine.
 
 ## Why Prometheus?
 
-### The Problem with Existing Tools
+### The Problem
 
-**Claude Projects** is useful but limited. You're locked into Anthropic's ecosystem, can't use multiple providers, and "projects" don't communicate with each other. There's no concept of roles, permissions, or delegation between AI agents.
+**Claude Projects** gives you one provider, no agent-to-agent communication, and no task delegation. You're re-explaining context every conversation.
 
-**OpenClaw** and similar multi-provider tools are powerful but complex. Setting up authentication, configuring providers, and managing agents requires technical knowledge and terminal commands. The UX isn't friendly for non-developers.
+**OpenClaw** is powerful but requires terminal setup, CLI commands, and technical knowledge. Not built for non-developers.
 
-**ChatGPT, Gemini, and other chat apps** give you one conversation at a time with one model. No team structure, no shared knowledge, no task handoffs.
+**ChatGPT and Gemini** are single-agent chatbots. No teams, no shared knowledge, no collaboration.
 
-### What Prometheus Does Differently
+### The Solution
 
-Prometheus gives you an **AI workforce** — not just a chatbot. Each AI employee has:
+Prometheus lets you build **AI agent teams** — not just chat with one model. Each agent is a specialized team member:
 
-- A **name, role, and personality** (system prompt)
-- **Assigned tools** — web search, file access, code execution, and custom MCP tools
-- **Shared knowledge base** — markdown documents referenced across your team
-- **Contact permissions** — control which employees can delegate tasks to each other
-- **Provider flexibility** — assign any model from any provider to any employee
+- **Researcher** — searches the web, analyzes data, produces reports
+- **Writer** — creates content in your brand voice using your knowledge base
+- **Developer** — writes code, reads files, executes scripts
+- **Your custom roles** — any specialization you need
 
-You're the CEO. Your AI employees work for you.
+Agents collaborate through structured **Agent Briefs** — when one agent needs help, they delegate with a clear objective, deliverable, and acceptance criteria. The receiving agent works autonomously and delivers results to your Tasks dashboard.
 
-## Features
+## Key Features
 
-- **Multi-Company Support** — Manage multiple organizations with separate teams and data
-- **Departments** — Organize employees into teams (Engineering, Creative, Research, etc.)
-- **HR-Style Management** — Hire, fire, and rehire AI employees
-- **7 AI Providers** — Vercel AI Gateway (50+ models), OpenAI, Anthropic, Google, Mistral, Ollama Cloud, Ollama Local
-- **Vercel AI Gateway** — One API key for Claude, GPT, Gemini, Grok, DeepSeek, Llama, Qwen, and more
-- **Ollama Cloud** — Access DeepSeek 671B, Qwen 480B and other large open-source models via $20/mo subscription
-- **Ollama Local** — Run models locally for free with zero data leaving your machine
-- **Granular Permissions** — Per-employee control over web access, file operations, code execution, and inter-employee communication
-- **Contact Access Control** — Define which employees can talk to each other, by department or individually
-- **Knowledge Base** — Create and assign markdown documents as shared context
-- **Real-Time Chat** — Stream responses with conversation history
-- **Dark-Only Premium UI** — Fire-inspired design system with ember gradients and flame accents
-- **100% Local Data** — All data stored on your machine, never sent to third parties
+### AI Agent Management
+- **Named agents with roles** — each agent has a personality, system prompt, and specialization
+- **Employee templates** — start with Researcher, Writer, or Developer presets
+- **Departments** — organize agents into teams (Engineering, Creative, Research)
+- **Multi-company** — manage separate organizations with isolated data
+
+### Inter-Agent Collaboration
+- **Task delegation** — agents assign work to each other using structured briefs
+- **Auto-execution** — delegated tasks run automatically in the background
+- **Contact access control** — define which agents can communicate with each other
+- **Task tracking** — monitor pending, in-progress, completed, and escalated tasks
+
+### Recurring Tasks & Automation
+- **Scheduled tasks** — hourly, daily, or weekly automated agent work
+- **Background execution** — tasks run when the app is open
+- **Catch-up on missed runs** — executes overdue tasks when you launch the app
+
+### Knowledge Management
+- **Shared knowledge base** — markdown documents injected with every agent message
+- **Living vs Reference docs** — mark documents as frequently changing or stable
+- **Review reminders** — get prompted when documents are overdue for verification
+- **Context stays current** — agents always work with your latest business context
+
+### Tool Execution
+- **Web Search** — agents can search the web for real-time information
+- **Web Browse** — read and extract content from URLs
+- **Read Files** — access your local filesystem
+- **Write Files** — create documents, downloadable from the chat
+- **Execute Code** — run code in a sandboxed environment
+- **Per-tool approval** — require your confirmation before execution
+
+### Multi-Provider Support (7 Providers, 50+ Models)
+
+| Provider | Models | Best For |
+|----------|--------|----------|
+| **Vercel AI Gateway** | Claude, GPT, Gemini, Grok, DeepSeek, Llama, Qwen, 50+ more | One API key for everything |
+| **OpenAI** | GPT-4o, o1, o3 | General tasks |
+| **Anthropic** | Claude Opus, Sonnet, Haiku | Reasoning, coding |
+| **Google** | Gemini 2.5 Pro & Flash | Multimodal, large context |
+| **Mistral** | Mistral Large, Codestral | Fast, EU-based |
+| **Ollama Cloud** | DeepSeek 671B, Qwen 480B | Subscription-based open-source |
+| **Ollama Local** | Llama, Mistral, CodeLlama | Free, private, offline |
+
+### Privacy & Performance
+- **100% local data** — all data stored on your machine, never sent to third parties
+- **Zero Data Retention** — native ZDR via Vercel AI Gateway
+- **Prompt caching** — automatic caching for Anthropic, OpenAI, Vercel AI Gateway, Ollama
+- **Token counting** — real-time token usage display
+- **Conversation compression** — summarize long conversations to save context window
+- **Streaming** — real-time response streaming for all providers
+
+### Desktop Experience
+- **Native macOS app** — Electron with custom dark design system
+- **Notifications** — native + in-app alerts for completed/escalated tasks
+- **Onboarding** — guided setup for first-time users
+- **Auto-update** — automatic updates via GitHub Releases
 
 ## Getting Started
 
@@ -48,77 +92,51 @@ You're the CEO. Your AI employees work for you.
 # Install dependencies
 npm install
 
-# Run the desktop app
+# Run the desktop app (from Terminal.app, not VS Code)
 npm run dev
 
-# Or preview in browser (no Electron needed)
+# Or preview in browser
 npm run dev:web
+
+# Build for production
+npm run build && npm run pack
 ```
 
-1. Open the app and go to **Settings**
-2. Enable a provider and enter your API key
-3. Go to **Employees** and hire your first team member
-4. Start chatting
-
-## Supported AI Providers
-
-| Provider | Auth | Models | Best For |
-|----------|------|--------|----------|
-| **Vercel AI Gateway** | API Key | 50+ models from all providers | One key for everything |
-| **OpenAI** | API Key | GPT-4o, o1, o3 | General tasks |
-| **Anthropic** | API Key | Claude Opus, Sonnet, Haiku | Reasoning, coding |
-| **Google** | API Key | Gemini 2.5 Pro & Flash | Multimodal, large context |
-| **Mistral** | API Key | Mistral Large, Codestral | Fast European models |
-| **Ollama Cloud** | API Key ($20-100/mo) | DeepSeek 671B, Qwen 480B | Large open-source models |
-| **Ollama (Local)** | None | Llama, Mistral, CodeLlama | Free, private, offline |
-
-## Tech Stack
-
-- **Electron** + **React 19** + **TypeScript** — Cross-platform desktop app
-- **Tailwind CSS v4** — Custom dark design system
-- **Zustand** — Lightweight state management
-- **Vite** — Fast builds and HMR
-
-## Project Structure
-
-```
-src/
-├── main/              # Electron main process
-│   ├── index.ts       # App entry, IPC handlers
-│   ├── store.ts       # Persistent JSON store
-│   ├── types.ts       # Shared type definitions
-│   └── agent-manager.ts
-├── preload/           # Secure IPC bridge
-│   └── index.ts
-└── renderer/          # React frontend
-    └── src/
-        ├── components/
-        │   ├── ui/          # Card, Button, Input, Badge, Switch
-        │   ├── layout/      # Sidebar with company switcher
-        │   ├── dashboard/   # Stats, quick actions, team overview
-        │   ├── employees/   # Employee management, editor, permissions
-        │   ├── chat/        # Conversation interface
-        │   ├── knowledge/   # Document management
-        │   └── settings/    # Provider configuration
-        ├── stores/          # Zustand state
-        └── lib/             # Utilities, mock API
-```
+1. Open the app → follow the onboarding guide
+2. Go to **Settings** → add your API key
+3. **Hire** your first agent (try a template!)
+4. Start chatting and delegating
 
 ## Comparison
 
 | Feature | Prometheus | Claude Projects | OpenClaw | ChatGPT |
 |---------|-----------|----------------|----------|---------|
 | Multiple AI providers | 7 providers, 50+ models | Anthropic only | Multi-provider | OpenAI only |
-| Named AI agents with roles | Yes | No | Partial | Custom GPTs (limited) |
+| AI agent teams with roles | Yes | No | Partial | Custom GPTs (limited) |
+| Inter-agent task delegation | Yes | No | No | No |
+| Recurring scheduled tasks | Yes | No | No | No |
 | Shared knowledge base | Yes | Project docs | No | No |
-| Inter-agent communication | Yes | No | No | No |
+| Tool execution (web, files, code) | Yes | Limited | Varies | Plugins |
 | Desktop app | Yes | Web only | Web + CLI | Web + app |
 | Local/offline models | Yes (Ollama) | No | No | No |
-| Granular permissions | Per-employee | Per-project | No | No |
-| Department organization | Yes | No | No | No |
 | Data stays local | Yes | Cloud | Cloud | Cloud |
-| Setup complexity | Install + run | Sign up | Complex CLI setup | Sign up |
+| Zero data retention | Yes (Vercel ZDR) | No | No | No |
+| Context management | Living/reference docs | No | No | No |
+| Notifications | Native + in-app | No | No | No |
 | Open source | Yes (MIT) | No | Yes | No |
+| Setup complexity | Install + run | Sign up | Complex CLI | Sign up |
+
+## Tech Stack
+
+- **Electron 35** + **React 19** + **TypeScript** — cross-platform desktop app
+- **Tailwind CSS v4** — custom dark design system
+- **Zustand** — lightweight state management
+- **Vite 8** — fast builds and HMR
+- **electron-updater** — auto-update infrastructure
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions and guidelines.
 
 ## License
 
