@@ -55,7 +55,11 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
   const [selectedKnowledge, setSelectedKnowledge] = useState<string[]>(employee?.knowledgeIds || [])
   const [tools, setTools] = useState<ToolAssignment[]>(employee?.tools || DEFAULT_TOOLS)
   const [provider, setProvider] = useState(employee?.provider || settings?.defaultProvider || 'openai')
-  const [model, setModel] = useState(employee?.model || settings?.defaultModel || 'gpt-4o')
+  const initialModel = employee?.model || settings?.defaultModel || 'gpt-4o'
+  // If saved model no longer exists in provider's model list, fallback to first available
+  const providerModels = settings?.providers.find(p => p.id === (employee?.provider || settings?.defaultProvider || 'openai'))?.models || []
+  const validModel = providerModels.includes(initialModel) ? initialModel : (providerModels[0] || initialModel)
+  const [model, setModel] = useState(validModel)
   const [permissions, setPermissions] = useState<PermissionSet>(employee?.permissions || DEFAULT_PERMISSIONS)
   const [departmentId, setDepartmentId] = useState<string | null>(employee?.departmentId ?? null)
   const [activeTab, setActiveTab] = useState<'basic' | 'tools' | 'knowledge' | 'permissions'>('basic')
