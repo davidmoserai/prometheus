@@ -93,6 +93,14 @@ export interface ChatMessage {
   attachments?: ChatAttachment[]
 }
 
+export interface TaskMessage {
+  id: string
+  role: 'agent' | 'user' | 'tool'
+  employeeId?: string
+  content: string
+  timestamp: string
+}
+
 export interface Task {
   id: string
   fromEmployeeId: string
@@ -106,6 +114,7 @@ export interface Task {
   escalateIf: string
   status: 'pending' | 'in_progress' | 'completed' | 'escalated'
   response?: string
+  messages: TaskMessage[]
   createdAt: string
   updatedAt: string
 }

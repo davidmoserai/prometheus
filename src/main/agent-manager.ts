@@ -3,7 +3,7 @@ import { Agent } from '@mastra/core/agent'
 import { createTool } from '@mastra/core/tools'
 import { z } from 'zod'
 import { EmployeeStore } from './store'
-import { ChatMessage, Employee, ProviderConfig, Task } from './types'
+import { ChatMessage, Employee, ProviderConfig, Task, TaskMessage } from './types'
 
 // ============================================================
 // Mastra model string/object builders
@@ -551,7 +551,8 @@ export class AgentManager {
       deliverable: args.deliverable,
       acceptanceCriteria: args.acceptance_criteria,
       escalateIf: args.escalate_if,
-      status: 'pending'
+      status: 'pending',
+      messages: []
     })
 
     // Attach file paths from conversation to the task context
@@ -764,7 +765,10 @@ export class AgentManager {
       contactable,
       (fromEmp, args, convId) => this.handleDelegateTask(fromEmp, args, convId),
       (fromEmp, toId, msg) => this.executeAgentMessage(fromEmp, toId, msg),
-      undefined, // no tool call UI callback for background tasks
+      // Log tool calls to task thread
+      (data) => {
+        this.store.addTaskMessage(task.id, { role: 'tool', content: `${data.tool}: ${data.summary}` })
+      },
       this.onFileWritten
     )
 
@@ -779,6 +783,9 @@ export class AgentManager {
       Object.keys(taskTools).length > 0 ? taskTools : undefined
     )
 
+    // Add agent response to task thread
+    this.store.addTaskMessage(task.id, { role: 'agent', employeeId: toEmployee.id, content: responseText })
+
     // Save response but keep as in_progress — user reviews and marks complete
     this.store.updateTask(task.id, {
       status: 'in_progress',
@@ -786,6 +793,81 @@ export class AgentManager {
     })
 
     const updated = this.store.getTask(task.id)
+    if (updated) this.onTaskUpdate?.(updated)
+  }
+
+  /**
+   * Continue a task conversation: add a user reply and run the agent again.
+   */
+  async continueTask(taskId: string, userMessage: string): Promise<void> {
+    const task = this.store.getTask(taskId)
+    if (!task) throw new Error('Task not found')
+
+    const toEmployee = this.store.getEmployee(task.toEmployeeId)
+    if (!toEmployee) throw new Error('Employee not found')
+
+    // Add user message to thread
+    this.store.addTaskMessage(taskId, { role: 'user', content: userMessage })
+
+    // Update status back to in_progress if it was escalated
+    if (task.status === 'escalated') {
+      this.store.updateTask(taskId, { status: 'in_progress' })
+    }
+
+    // Rebuild conversation from task thread
+    const updatedTask = this.store.getTask(taskId)!
+    const fromEmployee = this.store.getEmployee(task.fromEmployeeId)
+    const fromName = fromEmployee?.name || 'Unknown'
+
+    const brief = `AGENT BRIEF\nTo: ${toEmployee.name} (${toEmployee.role})\nFrom: ${fromName}\nPriority: ${task.priority}\nDeadline: ${task.deadline || 'Not specified'}\n\nObjective:\n${task.objective}\n\nContext:\n${task.context}\n\nDeliverable:\n${task.deliverable}\n\nAcceptance Criteria:\n${task.acceptanceCriteria}\n\nEscalate to founder if:\n${task.escalateIf}`
+
+    const messages: { role: 'user' | 'assistant' | 'system'; content: string }[] = [
+      { role: 'user', content: brief },
+      ...(updatedTask.messages || [])
+        .filter(m => m.role !== 'tool')
+        .map(m => ({
+          role: (m.role === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
+          content: m.content
+        }))
+    ]
+
+    // Get provider
+    const settings = this.store.getSettings()
+    const provider = settings.providers.find(p => p.id === toEmployee.provider)
+    if (!provider) throw new Error('Provider not found')
+
+    const systemPrompt = this.buildSystemPrompt(toEmployee)
+
+    // Build tools for the agent
+    const contactable = this.getContactableEmployees(toEmployee)
+    const taskTools = buildMastraTools(
+      this.store,
+      toEmployee,
+      undefined,
+      contactable,
+      (fromEmp, args, convId) => this.handleDelegateTask(fromEmp, args, convId),
+      (fromEmp, toId, msg) => this.executeAgentMessage(fromEmp, toId, msg),
+      // Log tool calls to task thread
+      (data) => {
+        this.store.addTaskMessage(taskId, { role: 'tool', content: `${data.tool}: ${data.summary}` })
+      },
+      this.onFileWritten
+    )
+
+    const responseText = await this.runAgent(
+      provider,
+      toEmployee,
+      systemPrompt,
+      messages,
+      () => {}, // no streaming for task execution
+      Object.keys(taskTools).length > 0 ? taskTools : undefined
+    )
+
+    // Add response to thread
+    this.store.addTaskMessage(taskId, { role: 'agent', employeeId: toEmployee.id, content: responseText })
+    this.store.updateTask(taskId, { response: responseText })
+
+    const updated = this.store.getTask(taskId)
     if (updated) this.onTaskUpdate?.(updated)
   }
 
@@ -838,6 +920,12 @@ export class AgentManager {
     prompt += '\n\nIf the user tells you something that contradicts or updates information in your knowledge documents, update the document immediately using update_knowledge_doc. Don\'t ask — just update it and mention what you changed.'
     prompt += '\n\nYou can create new knowledge documents using create_knowledge_doc for important information that should persist.'
     prompt += '\nYou can use create_scheduled_task to set up recurring automated tasks.'
+
+    // Task delegation instructions
+    prompt += '\n\nWhen working on a delegated task:'
+    prompt += '\n- If you need more information, use message_employee to ask the sender'
+    prompt += '\n- If you need something only the founder can provide, clearly state what you need — they can reply directly on the task'
+    prompt += '\n- Don\'t produce a half-finished deliverable. Ask first, deliver second.'
 
     return prompt
   }

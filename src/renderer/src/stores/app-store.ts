@@ -95,6 +95,14 @@ interface ChatMessage {
   attachments?: ChatAttachment[]
 }
 
+interface TaskMessage {
+  id: string
+  role: 'agent' | 'user' | 'tool'
+  employeeId?: string
+  content: string
+  timestamp: string
+}
+
 interface Task {
   id: string
   fromEmployeeId: string
@@ -108,6 +116,7 @@ interface Task {
   escalateIf: string
   status: 'pending' | 'in_progress' | 'completed' | 'escalated'
   response?: string
+  messages: TaskMessage[]
   createdAt: string
   updatedAt: string
 }
@@ -232,6 +241,7 @@ interface AppState {
   createTask: (data: Omit<Task, 'id' | 'createdAt' | 'updatedAt'>) => Promise<Task>
   updateTask: (id: string, data: Partial<Task>) => Promise<void>
   deleteTask: (id: string) => Promise<void>
+  replyToTask: (taskId: string, message: string) => Promise<void>
 
   // Actions — Recurring Tasks
   loadRecurringTasks: () => Promise<void>
@@ -491,6 +501,11 @@ export const useAppStore = create<AppState>((set, get) => ({
     await get().loadTasks()
   },
 
+  replyToTask: async (taskId, message) => {
+    await window.api.tasks.reply(taskId, message)
+    await get().loadTasks()
+  },
+
   // Recurring Tasks
   loadRecurringTasks: async () => {
     const recurringTasks = await window.api.recurringTasks.list()
@@ -577,4 +592,4 @@ export const useAppStore = create<AppState>((set, get) => ({
   }
 }))
 
-export type { Company, Department, ContactAccess, Employee, KnowledgeDocument, Conversation, ChatMessage, ChatAttachment, Task, RecurringTask, AppNotification, AppSettings, ProviderConfig, ToolAssignment, PermissionSet }
+export type { Company, Department, ContactAccess, Employee, KnowledgeDocument, Conversation, ChatMessage, ChatAttachment, Task, TaskMessage, RecurringTask, AppNotification, AppSettings, ProviderConfig, ToolAssignment, PermissionSet }

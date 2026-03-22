@@ -63,7 +63,8 @@ export class Scheduler {
         deliverable: 'Complete the scheduled task as described',
         acceptanceCriteria: 'Task completed successfully',
         escalateIf: 'Unable to complete the task',
-        status: 'pending'
+        status: 'pending',
+        messages: []
       })
 
       // Create a conversation for the task execution

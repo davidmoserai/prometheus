@@ -47,6 +47,7 @@ const api = {
     create: (data: unknown) => ipcRenderer.invoke('tasks:create', data),
     update: (id: string, data: unknown) => ipcRenderer.invoke('tasks:update', id, data),
     delete: (id: string) => ipcRenderer.invoke('tasks:delete', id),
+    reply: (taskId: string, message: string) => ipcRenderer.invoke('tasks:reply', taskId, message),
     onUpdate: (callback: (task: unknown) => void) => {
       const handler = (_event: unknown, task: unknown) => callback(task)
       ipcRenderer.on('task:updated', handler)

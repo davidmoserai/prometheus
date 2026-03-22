@@ -11,6 +11,7 @@ import {
   ChatMessage,
   ChatAttachment,
   Task,
+  TaskMessage,
   RecurringTask,
   AppSettings,
   DEFAULT_SETTINGS,
@@ -573,6 +574,7 @@ export class EmployeeStore {
     if (!active.tasks) active.tasks = []
     const task: Task = {
       ...data,
+      messages: data.messages || [],
       id: uuid(),
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
@@ -606,6 +608,22 @@ export class EmployeeStore {
       return true
     }
     return false
+  }
+
+  addTaskMessage(taskId: string, msg: Omit<TaskMessage, 'id' | 'timestamp'>): TaskMessage {
+    const tasks = this.getActiveData().tasks || []
+    const task = tasks.find(t => t.id === taskId)
+    if (!task) throw new Error(`Task ${taskId} not found`)
+    if (!task.messages) task.messages = []
+    const taskMsg: TaskMessage = {
+      ...msg,
+      id: uuid(),
+      timestamp: new Date().toISOString()
+    }
+    task.messages.push(taskMsg)
+    task.updatedAt = new Date().toISOString()
+    this.save()
+    return taskMsg
   }
 
   // Recurring Tasks (scoped to active company)

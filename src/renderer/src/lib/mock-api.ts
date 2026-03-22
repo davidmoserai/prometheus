@@ -67,6 +67,14 @@ interface Conversation {
   updatedAt: string
 }
 
+interface TaskMessage {
+  id: string
+  role: 'agent' | 'user' | 'tool'
+  employeeId?: string
+  content: string
+  timestamp: string
+}
+
 interface Task {
   id: string
   fromEmployeeId: string
@@ -80,6 +88,7 @@ interface Task {
   escalateIf: string
   status: 'pending' | 'in_progress' | 'completed' | 'escalated'
   response?: string
+  messages: TaskMessage[]
   createdAt: string
   updatedAt: string
 }
@@ -372,7 +381,7 @@ export function installMockApi() {
       create: async (data: Omit<Task, 'id' | 'createdAt' | 'updatedAt'>) => {
         const active = getActive()
         if (!active.tasks) active.tasks = []
-        const task = { ...data, id: uuid(), createdAt: now(), updatedAt: now() } as Task
+        const task = { ...data, messages: data.messages || [], id: uuid(), createdAt: now(), updatedAt: now() } as Task
         active.tasks.push(task)
         return task
       },
@@ -387,6 +396,21 @@ export function installMockApi() {
         if (!active.tasks) return true
         active.tasks = active.tasks.filter(t => t.id !== id)
         return true
+      },
+      reply: async (taskId: string, message: string) => {
+        const active = getActive()
+        const task = (active.tasks || []).find(t => t.id === taskId)
+        if (!task) return undefined
+        if (!task.messages) task.messages = []
+        // Add user message
+        task.messages.push({ id: uuid(), role: 'user', content: message, timestamp: now() })
+        // Add mock agent response
+        const emp = active.employees.find(e => e.id === task.toEmployeeId)
+        const reply = `[Mock] ${emp?.name || 'Agent'} received your reply. In the real app, this would trigger the agent to respond.`
+        task.messages.push({ id: uuid(), role: 'agent', employeeId: task.toEmployeeId, content: reply, timestamp: now() })
+        task.response = reply
+        task.updatedAt = now()
+        return task
       }
     },
     chat: {

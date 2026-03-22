@@ -12,7 +12,10 @@ import {
   CalendarClock,
   Plus,
   X,
-  Pencil
+  Pencil,
+  Wrench,
+  Bot,
+  User
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -69,12 +72,15 @@ export function TasksPage() {
     recurringTasks,
     updateTask,
     deleteTask,
+    replyToTask,
     createRecurringTask,
     updateRecurringTask,
     deleteRecurringTask
   } = useAppStore()
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null)
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
+  const [replyText, setReplyText] = useState('')
+  const [isReplying, setIsReplying] = useState(false)
   const [showScheduledForm, setShowScheduledForm] = useState(false)
   const [editingRecurringId, setEditingRecurringId] = useState<string | null>(null)
   const [scheduledForm, setScheduledForm] = useState({
@@ -110,6 +116,17 @@ export function TasksPage() {
       else next.add(status)
       return next
     })
+  }
+
+  const handleReply = async (taskId: string) => {
+    if (!replyText.trim() || isReplying) return
+    setIsReplying(true)
+    try {
+      await replyToTask(taskId, replyText.trim())
+      setReplyText('')
+    } finally {
+      setIsReplying(false)
+    }
   }
 
   const handleStatusChange = async (taskId: string, newStatus: Task['status']) => {
@@ -524,14 +541,61 @@ export function TasksPage() {
                                   </div>
                                 </div>
 
-                                {/* Response (if any) */}
-                                {task.response && (
+                                {/* Task Thread */}
+                                {task.messages && task.messages.length > 0 && (
+                                  <div style={{ marginTop: '16px', marginBottom: '20px' }}>
+                                    <p className="text-[12px] font-medium text-text-tertiary uppercase tracking-wider" style={{ marginBottom: '12px' }}>Activity</p>
+                                    <div className="flex flex-col" style={{ gap: '8px' }}>
+                                      {task.messages.map((msg) => (
+                                        <div key={msg.id} className={`rounded-lg ${
+                                          msg.role === 'tool' ? 'bg-white/[0.02]' : msg.role === 'user' ? 'bg-flame-500/[0.06] border border-flame-500/15' : 'bg-bg-tertiary border border-border-default'
+                                        }`} style={{ padding: '10px 14px' }}>
+                                          <div className="flex items-center" style={{ gap: '6px', marginBottom: '4px' }}>
+                                            {msg.role === 'tool' && <Wrench className="w-3 h-3 text-text-tertiary" />}
+                                            {msg.role === 'agent' && <Bot className="w-3 h-3 text-sky-400" />}
+                                            {msg.role === 'user' && <User className="w-3 h-3 text-flame-400" />}
+                                            <span className="text-[11px] text-text-tertiary">
+                                              {msg.role === 'tool' ? 'Tool' : msg.role === 'user' ? 'You' : employees.find(e => e.id === msg.employeeId)?.name || 'Agent'}
+                                            </span>
+                                            <span className="text-[10px] text-text-tertiary ml-auto">
+                                              {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                            </span>
+                                          </div>
+                                          <p className={`text-[13px] ${msg.role === 'tool' ? 'text-text-tertiary' : 'text-text-primary'} whitespace-pre-wrap`}>{msg.content}</p>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* Fallback: show response if no messages but response exists */}
+                                {(!task.messages || task.messages.length === 0) && task.response && (
                                   <div
                                     className="rounded-xl bg-emerald-500/[0.04] border border-emerald-500/10"
                                     style={{ padding: '20px', marginBottom: '20px' }}
                                   >
                                     <p className="text-[13px] text-emerald-400 font-semibold" style={{ marginBottom: '8px' }}>Response</p>
                                     <p className="text-[13px] text-text-secondary whitespace-pre-wrap">{task.response}</p>
+                                  </div>
+                                )}
+
+                                {/* Reply input */}
+                                {(task.status === 'in_progress' || task.status === 'escalated') && (
+                                  <div style={{ marginBottom: '20px' }}>
+                                    <div className="flex" style={{ gap: '8px' }}>
+                                      <input
+                                        value={expandedTaskId === task.id ? replyText : ''}
+                                        onChange={(e) => setReplyText(e.target.value)}
+                                        onKeyDown={(e) => e.key === 'Enter' && handleReply(task.id)}
+                                        placeholder="Reply to this task..."
+                                        className="flex-1 rounded-lg bg-bg-tertiary border border-border-default text-[13px] text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-flame-500/30"
+                                        style={{ padding: '10px 14px' }}
+                                        disabled={isReplying}
+                                      />
+                                      <Button size="sm" onClick={() => handleReply(task.id)} disabled={!replyText.trim() || isReplying}>
+                                        {isReplying ? 'Sending...' : 'Send'}
+                                      </Button>
+                                    </div>
                                   </div>
                                 )}
 
