@@ -313,6 +313,27 @@ export class AgentManager {
         }
       })
     }
+
+    // Always add create_scheduled_task — any agent can schedule recurring work
+    tools.push({
+      type: 'function',
+      function: {
+        name: 'create_scheduled_task',
+        description: 'Create a recurring scheduled task that runs automatically. Use this to set up daily reports, weekly check-ins, or any recurring work.',
+        parameters: {
+          type: 'object',
+          properties: {
+            name: { type: 'string', description: 'Short name for the task' },
+            employee_id: { type: 'string', description: 'ID of the employee who should execute this task (use your own ID to schedule for yourself)' },
+            brief: { type: 'string', description: 'The task description/instructions to execute each time' },
+            schedule: { type: 'string', enum: ['hourly', 'daily', 'weekly'], description: 'How often to run' },
+            schedule_time: { type: 'string', description: 'When to run, e.g. "08:00" for daily or "monday 09:00" for weekly' }
+          },
+          required: ['name', 'employee_id', 'brief', 'schedule']
+        }
+      }
+    })
+
     return tools
   }
 
@@ -384,6 +405,24 @@ export class AgentManager {
         }
       })
     }
+
+    // Always add create_scheduled_task
+    tools.push({
+      name: 'create_scheduled_task',
+      description: 'Create a recurring scheduled task that runs automatically. Use this to set up daily reports, weekly check-ins, or any recurring work.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'Short name for the task' },
+          employee_id: { type: 'string', description: 'ID of the employee who should execute this task' },
+          brief: { type: 'string', description: 'The task description/instructions to execute each time' },
+          schedule: { type: 'string', enum: ['hourly', 'daily', 'weekly'], description: 'How often to run' },
+          schedule_time: { type: 'string', description: 'When to run, e.g. "08:00" for daily' }
+        },
+        required: ['name', 'employee_id', 'brief', 'schedule']
+      }
+    })
+
     return tools
   }
 
@@ -445,6 +484,37 @@ export class AgentManager {
       }
       case 'execute_code': {
         return `Code execution is not yet available in sandbox. Language: ${args.language}, Code length: ${args.code?.length || 0} chars.`
+      }
+      case 'create_scheduled_task': {
+        try {
+          const schedule = (args.schedule || 'daily') as 'hourly' | 'daily' | 'weekly'
+          const now = new Date()
+          let nextRunAt: Date
+
+          if (schedule === 'hourly') {
+            nextRunAt = new Date(now.getTime() + 60 * 60 * 1000)
+          } else if (schedule === 'weekly') {
+            nextRunAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000)
+          } else {
+            nextRunAt = new Date(now.getTime() + 24 * 60 * 60 * 1000)
+          }
+
+          const recurringTask = this.store.createRecurringTask({
+            employeeId: args.employee_id || '',
+            name: args.name || 'Scheduled Task',
+            brief: args.brief || '',
+            schedule,
+            scheduleTime: args.schedule_time || undefined,
+            enabled: true,
+            lastRunAt: null,
+            nextRunAt: nextRunAt.toISOString()
+          })
+
+          this.onTaskUpdate?.(recurringTask as unknown as Task)
+          return `Scheduled task "${recurringTask.name}" created. Runs ${schedule}${args.schedule_time ? ` at ${args.schedule_time}` : ''}. Next run: ${nextRunAt.toLocaleString()}`
+        } catch (err) {
+          return `Failed to create scheduled task: ${err instanceof Error ? err.message : 'Unknown error'}`
+        }
       }
       default:
         return `Unknown tool: ${toolName}`
@@ -584,10 +654,13 @@ export class AgentManager {
     }
 
     // Append team delegation info
+    // Add employee's own identity (needed for self-scheduling)
+    prompt += `\n\n---\n\nYour ID: ${employee.id}\nYour name: ${employee.name}`
+
     const contactable = this.getContactableEmployees(employee)
     if (contactable.length > 0) {
       const departments = this.store.listDepartments()
-      prompt += '\n\n---\n\n## Your Team\nYou can delegate tasks to these team members:\n'
+      prompt += '\n\n## Your Team\nYou can delegate tasks to these team members:\n'
       for (const e of contactable) {
         const dept = departments.find(d => d.id === e.departmentId)
         const deptLabel = dept ? ` — ${dept.name}` : ''
@@ -595,6 +668,8 @@ export class AgentManager {
       }
       prompt += '\nUse the delegate_task tool when work should be handled by someone else.'
     }
+
+    prompt += '\n\nYou can use create_scheduled_task to set up recurring automated tasks for yourself or any team member.'
 
     return prompt
   }
