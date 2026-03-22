@@ -508,7 +508,14 @@ export class AgentManager {
       onStream(accumulated)
     }
 
-    return accumulated
+    // Strip any leaked XML tool call markup from the response
+    const cleaned = accumulated
+      .replace(/<function_calls>[\s\S]*?<\/function_calls>/g, '')
+      .replace(/<function_calls>[\s\S]*?<\/antml:function_calls>/g, '')
+      .replace(/<invoke[\s\S]*?<\/invoke>/g, '')
+      .trim()
+
+    return cleaned || accumulated
   }
 
   /**
