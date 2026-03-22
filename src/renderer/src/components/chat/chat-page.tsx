@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Send, Plus, MessageSquare, ChevronLeft, Users, ArrowRight, Trash2, Minimize2, FileText, Download, Paperclip, X, Brain } from 'lucide-react'
+import { Send, Plus, MessageSquare, ChevronLeft, ChevronDown, Users, ArrowRight, Trash2, Minimize2, FileText, Download, Paperclip, X, Brain } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -9,6 +9,8 @@ interface ToolCallNotice {
   id: string
   tool: string
   summary: string
+  detail?: string
+  expanded?: boolean
 }
 
 export function ChatPage() {
@@ -102,7 +104,8 @@ export function ChatPage() {
         setToolCallNotices(prev => [...prev, {
           id: `tc-${Date.now()}-${Math.random()}`,
           tool: data.tool,
-          summary: data.summary
+          summary: data.summary,
+          detail: data.detail
         }])
       }
     })
@@ -407,11 +410,27 @@ export function ChatPage() {
               {toolCallNotices.map((notice) => (
                 <div
                   key={notice.id}
-                  className="flex items-center rounded-xl bg-white/[0.03] border border-border-default animate-fade-in"
-                  style={{ gap: '10px', padding: '8px 14px', maxWidth: '480px' }}
+                  className="rounded-xl bg-white/[0.03] border border-border-default animate-fade-in"
+                  style={{ maxWidth: '480px' }}
                 >
-                  {getToolIcon(notice.tool)}
-                  <span className="text-[12px] text-text-tertiary">{notice.summary}</span>
+                  <button
+                    className="flex items-center w-full cursor-pointer text-left transition-colors hover:bg-white/[0.02] rounded-xl"
+                    style={{ gap: '10px', padding: '8px 14px' }}
+                    onClick={() => notice.detail && setToolCallNotices(prev =>
+                      prev.map(n => n.id === notice.id ? { ...n, expanded: !n.expanded } : n)
+                    )}
+                  >
+                    {getToolIcon(notice.tool)}
+                    <span className="text-[12px] text-text-tertiary flex-1">{notice.summary}</span>
+                    {notice.detail && (
+                      <ChevronDown className={`w-3 h-3 text-text-tertiary transition-transform duration-200 ${notice.expanded ? 'rotate-180' : ''}`} />
+                    )}
+                  </button>
+                  {notice.expanded && notice.detail && (
+                    <div className="border-t border-border-default" style={{ padding: '10px 14px' }}>
+                      <pre className="text-[12px] text-text-secondary whitespace-pre-wrap font-mono leading-relaxed">{notice.detail}</pre>
+                    </div>
+                  )}
                 </div>
               ))}
               {/* Thinking indicator — shows when waiting for response */}

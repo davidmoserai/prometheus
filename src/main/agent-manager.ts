@@ -107,7 +107,7 @@ function buildMastraTools(
   contactable: Employee[],
   onDelegateTask: (fromEmployee: Employee, args: Record<string, string>) => { task: Task; message: string },
   onMessageEmployee?: (fromEmployee: Employee, toEmployeeId: string, message: string) => Promise<string>,
-  onToolCall?: (data: { tool: string; summary: string }) => void,
+  onToolCall?: (data: { tool: string; summary: string; detail?: string }) => void,
   onFileWritten?: (data: { conversationId: string; path: string; content: string }) => void
 ): Record<string, ReturnType<typeof createTool>> {
   const tools: Record<string, ReturnType<typeof createTool>> = {}
@@ -167,7 +167,7 @@ function buildMastraTools(
       content: z.string().describe('Your full updated memory (replaces previous). Include all facts you want to remember.')
     }),
     execute: async (input) => {
-      onToolCall?.({ tool: 'save_memory', summary: 'Saved to persistent memory' })
+      onToolCall?.({ tool: 'save_memory', summary: 'Saved to persistent memory', detail: input.content })
       store.updateEmployeeMemory(employee.id, input.content)
       return { result: 'Memory saved successfully. Your updated memory will be included in future conversations.' }
     }
@@ -182,7 +182,7 @@ function buildMastraTools(
       tags: z.array(z.string()).optional().describe('Tags for categorization')
     }),
     execute: async (input) => {
-      onToolCall?.({ tool: 'create_knowledge_doc', summary: `Created knowledge doc: ${input.title}` })
+      onToolCall?.({ tool: 'create_knowledge_doc', summary: `Created knowledge doc: ${input.title}`, detail: input.content.slice(0, 500) })
       const doc = store.createKnowledge({
         title: input.title,
         content: input.content,
@@ -210,7 +210,7 @@ function buildMastraTools(
     }),
     execute: async (input) => {
       const updated = store.updateKnowledge(input.doc_id, { content: input.content })
-      onToolCall?.({ tool: 'update_knowledge_doc', summary: `Updated knowledge doc: ${updated?.title || input.doc_id}` })
+      onToolCall?.({ tool: 'update_knowledge_doc', summary: `Updated knowledge doc: ${updated?.title || input.doc_id}`, detail: input.content.slice(0, 500) })
       if (!updated) return { result: `Document with ID "${input.doc_id}" not found.` }
       return { result: `Document "${updated.title}" updated successfully.` }
     }
@@ -370,7 +370,7 @@ export class AgentManager {
   private store: EmployeeStore
   private onTaskUpdate?: (task: Task) => void
   private onFileWritten?: (data: { conversationId: string; path: string; content: string }) => void
-  private onToolCall?: (data: { conversationId: string; tool: string; summary: string }) => void
+  private onToolCall?: (data: { conversationId: string; tool: string; summary: string; detail?: string }) => void
 
   constructor(store: EmployeeStore) {
     this.store = store
@@ -436,7 +436,7 @@ export class AgentManager {
     // Build tools via closure
     const contactable = this.getContactableEmployees(employee)
     const toolCallCb = this.onToolCall
-      ? (data: { tool: string; summary: string }) => this.onToolCall?.({ conversationId, ...data })
+      ? (data: { tool: string; summary: string; detail?: string }) => this.onToolCall?.({ conversationId, ...data })
       : undefined
     const tools = buildMastraTools(
       this.store,
