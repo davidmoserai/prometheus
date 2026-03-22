@@ -9,6 +9,7 @@ import {
   KnowledgeDocument,
   Conversation,
   ChatMessage,
+  Task,
   AppSettings,
   DEFAULT_SETTINGS
 } from './types'
@@ -18,6 +19,7 @@ interface CompanyData {
   knowledge: KnowledgeDocument[]
   conversations: Conversation[]
   departments: Department[]
+  tasks: Task[]
 }
 
 interface StoreData {
@@ -51,7 +53,7 @@ interface LegacyStoreData {
 }
 
 function emptyCompanyData(): CompanyData {
-  return { employees: [], knowledge: [], conversations: [], departments: [] }
+  return { employees: [], knowledge: [], conversations: [], departments: [], tasks: [] }
 }
 
 export class EmployeeStore {
@@ -155,7 +157,8 @@ export class EmployeeStore {
           employees,
           knowledge: legacy.knowledge || [],
           conversations: legacy.conversations || [],
-          departments: []
+          departments: [],
+          tasks: []
         }
       },
       settings: legacy.settings || DEFAULT_SETTINGS
@@ -460,6 +463,55 @@ export class EmployeeStore {
     this.data.settings = { ...this.data.settings, ...settings }
     this.save()
     return this.data.settings
+  }
+
+  // Tasks (scoped to active company)
+  listTasks(): Task[] {
+    return this.getActiveData().tasks || []
+  }
+
+  getTask(id: string): Task | undefined {
+    return (this.getActiveData().tasks || []).find(t => t.id === id)
+  }
+
+  createTask(data: Omit<Task, 'id' | 'createdAt' | 'updatedAt'>): Task {
+    const active = this.getActiveData()
+    if (!active.tasks) active.tasks = []
+    const task: Task = {
+      ...data,
+      id: uuid(),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    }
+    active.tasks.push(task)
+    this.save()
+    return task
+  }
+
+  updateTask(id: string, data: Partial<Task>): Task | undefined {
+    const tasks = this.getActiveData().tasks || []
+    const idx = tasks.findIndex(t => t.id === id)
+    if (idx === -1) return undefined
+    tasks[idx] = {
+      ...tasks[idx],
+      ...data,
+      id,
+      updatedAt: new Date().toISOString()
+    }
+    this.save()
+    return tasks[idx]
+  }
+
+  deleteTask(id: string): boolean {
+    const active = this.getActiveData()
+    if (!active.tasks) return false
+    const len = active.tasks.length
+    active.tasks = active.tasks.filter(t => t.id !== id)
+    if (active.tasks.length < len) {
+      this.save()
+      return true
+    }
+    return false
   }
 
 }

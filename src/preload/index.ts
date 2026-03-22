@@ -37,6 +37,13 @@ const api = {
     create: (employeeId: string) => ipcRenderer.invoke('conversations:create', employeeId),
     delete: (id: string) => ipcRenderer.invoke('conversations:delete', id)
   },
+  tasks: {
+    list: () => ipcRenderer.invoke('tasks:list'),
+    get: (id: string) => ipcRenderer.invoke('tasks:get', id),
+    create: (data: unknown) => ipcRenderer.invoke('tasks:create', data),
+    update: (id: string, data: unknown) => ipcRenderer.invoke('tasks:update', id, data),
+    delete: (id: string) => ipcRenderer.invoke('tasks:delete', id)
+  },
   chat: {
     send: (conversationId: string, message: string) =>
       ipcRenderer.invoke('chat:send', conversationId, message),

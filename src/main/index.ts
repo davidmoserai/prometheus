@@ -76,6 +76,13 @@ function registerIpcHandlers(): void {
   ipcMain.handle('conversations:create', (_event, employeeId: string) => store.createConversation(employeeId))
   ipcMain.handle('conversations:delete', (_event, id: string) => store.deleteConversation(id))
 
+  // Task IPC Handlers
+  ipcMain.handle('tasks:list', () => store.listTasks())
+  ipcMain.handle('tasks:get', (_event, id: string) => store.getTask(id))
+  ipcMain.handle('tasks:create', (_event, data) => store.createTask(data))
+  ipcMain.handle('tasks:update', (_event, id: string, data) => store.updateTask(id, data))
+  ipcMain.handle('tasks:delete', (_event, id: string) => store.deleteTask(id))
+
   // Chat IPC Handler
   ipcMain.handle('chat:send', async (_event, conversationId: string, message: string) => {
     return agentManager.sendMessage(conversationId, message, (chunk) => {

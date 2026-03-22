@@ -84,6 +84,23 @@ interface ChatMessage {
   handoffFrom?: string
 }
 
+interface Task {
+  id: string
+  fromEmployeeId: string
+  toEmployeeId: string
+  priority: 'high' | 'medium' | 'low'
+  deadline: string
+  objective: string
+  context: string
+  deliverable: string
+  acceptanceCriteria: string
+  escalateIf: string
+  status: 'pending' | 'in_progress' | 'completed' | 'escalated'
+  response?: string
+  createdAt: string
+  updatedAt: string
+}
+
 interface ProviderConfig {
   id: string
   name: string
@@ -113,8 +130,11 @@ interface AppState {
   conversations: Conversation[]
   settings: AppSettings | null
 
+  // Task data
+  tasks: Task[]
+
   // UI State
-  activeView: 'dashboard' | 'employees' | 'chat' | 'knowledge' | 'settings'
+  activeView: 'dashboard' | 'employees' | 'chat' | 'knowledge' | 'tasks' | 'settings'
   selectedEmployeeId: string | null
   selectedConversationId: string | null
   isCreatingEmployee: boolean
@@ -168,6 +188,12 @@ interface AppState {
   deleteConversation: (conversationId: string) => Promise<void>
   sendMessage: (conversationId: string, message: string) => Promise<void>
 
+  // Actions — Tasks
+  loadTasks: () => Promise<void>
+  createTask: (data: Omit<Task, 'id' | 'createdAt' | 'updatedAt'>) => Promise<Task>
+  updateTask: (id: string, data: Partial<Task>) => Promise<void>
+  deleteTask: (id: string) => Promise<void>
+
   // Actions — Settings
   loadSettings: () => Promise<void>
   updateSettings: (settings: Partial<AppSettings>) => Promise<void>
@@ -181,6 +207,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   departments: [],
   knowledge: [],
   conversations: [],
+  tasks: [],
   settings: null,
   activeView: 'dashboard',
   selectedEmployeeId: null,
@@ -245,7 +272,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       get().loadEmployees(),
       get().loadTerminatedEmployees(),
       get().loadDepartments(),
-      get().loadKnowledge()
+      get().loadKnowledge(),
+      get().loadTasks()
     ])
   },
 
@@ -377,6 +405,28 @@ export const useAppStore = create<AppState>((set, get) => ({
     get().clearStreamingContent(conversationId)
   },
 
+  // Tasks
+  loadTasks: async () => {
+    const tasks = await window.api.tasks.list()
+    set({ tasks })
+  },
+
+  createTask: async (data) => {
+    const task = await window.api.tasks.create(data)
+    await get().loadTasks()
+    return task
+  },
+
+  updateTask: async (id, data) => {
+    await window.api.tasks.update(id, data)
+    await get().loadTasks()
+  },
+
+  deleteTask: async (id) => {
+    await window.api.tasks.delete(id)
+    await get().loadTasks()
+  },
+
   // Settings
   loadSettings: async () => {
     const settings = await window.api.settings.get()
@@ -389,4 +439,4 @@ export const useAppStore = create<AppState>((set, get) => ({
   }
 }))
 
-export type { Company, Department, ContactAccess, Employee, KnowledgeDocument, Conversation, ChatMessage, AppSettings, ProviderConfig, ToolAssignment, PermissionSet }
+export type { Company, Department, ContactAccess, Employee, KnowledgeDocument, Conversation, ChatMessage, Task, AppSettings, ProviderConfig, ToolAssignment, PermissionSet }

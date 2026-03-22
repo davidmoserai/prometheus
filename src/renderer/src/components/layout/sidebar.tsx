@@ -4,6 +4,7 @@ import {
   Users,
   MessageSquare,
   BookOpen,
+  ClipboardList,
   Settings,
   Flame,
   ChevronDown,
@@ -26,13 +27,14 @@ const navItems = [
   { id: 'dashboard' as const, label: 'Dashboard', icon: LayoutDashboard },
   { id: 'employees' as const, label: 'Employees', icon: Users },
   { id: 'chat' as const, label: 'Chat', icon: MessageSquare },
+  { id: 'tasks' as const, label: 'Tasks', icon: ClipboardList },
   { id: 'knowledge' as const, label: 'Knowledge', icon: BookOpen },
   { id: 'settings' as const, label: 'Settings', icon: Settings }
 ]
 
 export function Sidebar() {
   const {
-    activeView, setActiveView, employees, companies, activeCompanyId,
+    activeView, setActiveView, employees, tasks, companies, activeCompanyId,
     switchCompany, createCompany, updateCompany, deleteCompany,
     sidebarCollapsed, toggleSidebar
   } = useAppStore()
@@ -379,6 +381,19 @@ export function Sidebar() {
                   isActive ? 'text-text-secondary' : 'text-text-tertiary'
                 )}>
                   {employees.length}
+                </span>
+              )}
+              {item.id === 'tasks' && tasks.filter(t => t.status === 'escalated').length > 0 && (
+                <span className="ml-auto flex items-center justify-center min-w-[20px] h-5 rounded-full bg-rose-500/20 text-rose-400 text-[11px] font-semibold tabular-nums" style={{ padding: '0 6px' }}>
+                  {tasks.filter(t => t.status === 'escalated').length}
+                </span>
+              )}
+              {item.id === 'tasks' && tasks.filter(t => t.status === 'escalated').length === 0 && tasks.length > 0 && (
+                <span className={cn(
+                  'ml-auto text-[12px] tabular-nums',
+                  isActive ? 'text-text-secondary' : 'text-text-tertiary'
+                )}>
+                  {tasks.length}
                 </span>
               )}
             </button>

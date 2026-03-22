@@ -4,11 +4,12 @@ import { Dashboard } from '@/components/dashboard/dashboard'
 import { EmployeesPage } from '@/components/employees/employees-page'
 import { ChatPage } from '@/components/chat/chat-page'
 import { KnowledgePage } from '@/components/knowledge/knowledge-page'
+import { TasksPage } from '@/components/tasks/tasks-page'
 import { SettingsPage } from '@/components/settings/settings-page'
 import { useAppStore } from '@/stores/app-store'
 
 export default function App() {
-  const { activeView, loadCompanies, loadEmployees, loadTerminatedEmployees, loadDepartments, loadKnowledge, loadSettings } = useAppStore()
+  const { activeView, loadCompanies, loadEmployees, loadTerminatedEmployees, loadDepartments, loadKnowledge, loadTasks, loadSettings } = useAppStore()
 
   // Load companies first, then scoped data
   useEffect(() => {
@@ -19,11 +20,12 @@ export default function App() {
         loadTerminatedEmployees(),
         loadDepartments(),
         loadKnowledge(),
+        loadTasks(),
         loadSettings()
       ])
     }
     init()
-  }, [loadCompanies, loadEmployees, loadTerminatedEmployees, loadDepartments, loadKnowledge, loadSettings])
+  }, [loadCompanies, loadEmployees, loadTerminatedEmployees, loadDepartments, loadKnowledge, loadTasks, loadSettings])
 
   // Set up streaming listener
   useEffect(() => {
@@ -44,6 +46,8 @@ export default function App() {
         return <ChatPage />
       case 'knowledge':
         return <KnowledgePage />
+      case 'tasks':
+        return <TasksPage />
       case 'settings':
         return <SettingsPage />
     }

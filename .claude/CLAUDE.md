@@ -32,16 +32,25 @@ Tailwind spacing utilities (`p-7`, `mb-5`, `gap-6`, etc.) do NOT render at corre
 - **Ollama Cloud** — DeepSeek 671B, Qwen 480B via subscription, `https://ollama.com/api`
 - **Ollama (Local)** — Free local models at `localhost:11434`
 
+## Inter-Agent Task Delegation
+- Employees can delegate work to other employees via `delegate_task` tool (based on `contactAccess` permissions)
+- Tasks use the **Agent Brief** format (objective, context, deliverable, acceptance criteria, escalation conditions)
+- Task data stored in `CompanyData.tasks[]`, CRUD via `tasks:*` IPC channels
+- Agent manager injects team member list into system prompt and provides `delegate_task` tool to LLM
+- Supports both OpenAI-compatible (function calling) and Anthropic (tool_use) formats
+- Tasks page at `components/tasks/tasks-page.tsx` — grouped by status (escalated/pending/in_progress/completed)
+
 ## Key Files
 - `src/main/index.ts` — Electron entry, IPC handlers (store/agentManager init in `app.whenReady()`)
 - `src/main/store.ts` — EmployeeStore class, JSON persistence, company-scoped data
-- `src/main/types.ts` — All type definitions + DEFAULT_PROVIDERS
-- `src/main/agent-manager.ts` — Real LLM agent manager (OpenAI-compatible, Anthropic Messages API, Ollama formats; streaming SSE; prompt caching)
+- `src/main/types.ts` — All type definitions (Company, Employee, Task, etc.) + DEFAULT_PROVIDERS
+- `src/main/agent-manager.ts` — Real LLM agent manager (OpenAI-compatible, Anthropic Messages API, Ollama formats; streaming SSE; prompt caching; delegate_task tool)
 - `src/preload/index.ts` — Secure IPC bridge
 - `src/renderer/src/lib/mock-api.ts` — Mock API for web preview mode
 - `globals.css` — Theme tokens, animations
 - `components/ui/` — card, button, input, badge, switch, textarea (spacing via inline styles)
 - `components/layout/sidebar.tsx` — Navigation, company switcher (inline dropdown, not absolute)
+- `components/tasks/tasks-page.tsx` — Task delegation dashboard (grouped by status, expandable briefs)
 - `electron.vite.config.ts` — Build config (uses `externalizeDepsPlugin()`)
 
 ## Running

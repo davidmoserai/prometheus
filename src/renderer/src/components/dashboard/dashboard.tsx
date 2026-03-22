@@ -1,10 +1,10 @@
-import { Users, BookOpen, MessageSquare, Zap, Plus, ArrowRight, Flame } from 'lucide-react'
+import { Users, BookOpen, MessageSquare, ClipboardList, Plus, ArrowRight, Flame } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { useAppStore } from '@/stores/app-store'
 
 export function Dashboard() {
-  const { employees, knowledge, conversations, companies, activeCompanyId, departments, setActiveView, setCreatingEmployee } = useAppStore()
+  const { employees, knowledge, conversations, tasks, companies, activeCompanyId, departments, setActiveView, setCreatingEmployee } = useAppStore()
 
   const activeCompany = companies.find(c => c.id === activeCompanyId)
 
@@ -34,9 +34,9 @@ export function Dashboard() {
       accentBorder: 'hover:border-emerald-500/30'
     },
     {
-      label: 'Tools Active',
-      value: employees.reduce((acc, e) => acc + e.tools.filter(t => t.enabled).length, 0),
-      icon: Zap,
+      label: 'Pending Tasks',
+      value: tasks.filter(t => t.status === 'pending' || t.status === 'in_progress').length,
+      icon: ClipboardList,
       gradient: 'from-violet-500/20 via-violet-600/10 to-transparent',
       iconColor: 'text-violet-400',
       accentBorder: 'hover:border-violet-500/30'

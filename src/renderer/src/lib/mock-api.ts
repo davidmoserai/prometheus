@@ -66,11 +66,29 @@ interface Conversation {
   updatedAt: string
 }
 
+interface Task {
+  id: string
+  fromEmployeeId: string
+  toEmployeeId: string
+  priority: 'high' | 'medium' | 'low'
+  deadline: string
+  objective: string
+  context: string
+  deliverable: string
+  acceptanceCriteria: string
+  escalateIf: string
+  status: 'pending' | 'in_progress' | 'completed' | 'escalated'
+  response?: string
+  createdAt: string
+  updatedAt: string
+}
+
 interface CompanyData {
   employees: Employee[]
   knowledge: KnowledgeDocument[]
   conversations: Conversation[]
   departments: Department[]
+  tasks: Task[]
 }
 
 const now = () => new Date().toISOString()
@@ -177,13 +195,14 @@ let companyData: Record<string, CompanyData> = {
         updatedAt: now()
       }
     ],
-    conversations: []
+    conversations: [],
+    tasks: []
   }
 }
 
 function getActive(): CompanyData {
   if (!companyData[activeCompanyId]) {
-    companyData[activeCompanyId] = { employees: [], knowledge: [], conversations: [], departments: [] }
+    companyData[activeCompanyId] = { employees: [], knowledge: [], conversations: [], departments: [], tasks: [] }
   }
   return companyData[activeCompanyId]
 }
@@ -222,7 +241,7 @@ export function installMockApi() {
       create: async (data: { name: string; avatar: string }) => {
         const company: Company = { ...data, id: uuid(), createdAt: now(), updatedAt: now() }
         companies.push(company)
-        companyData[company.id] = { employees: [], knowledge: [], conversations: [], departments: [] }
+        companyData[company.id] = { employees: [], knowledge: [], conversations: [], departments: [], tasks: [] }
         return company
       },
       update: async (id: string, data: Partial<Company>) => {
@@ -319,6 +338,29 @@ export function installMockApi() {
       delete: async (id: string) => {
         const data = getActive()
         data.conversations = data.conversations.filter(c => c.id !== id)
+      }
+    },
+    tasks: {
+      list: async () => getActive().tasks || [],
+      get: async (id: string) => (getActive().tasks || []).find(t => t.id === id),
+      create: async (data: Omit<Task, 'id' | 'createdAt' | 'updatedAt'>) => {
+        const active = getActive()
+        if (!active.tasks) active.tasks = []
+        const task = { ...data, id: uuid(), createdAt: now(), updatedAt: now() } as Task
+        active.tasks.push(task)
+        return task
+      },
+      update: async (id: string, data: Partial<Task>) => {
+        const active = getActive()
+        if (!active.tasks) active.tasks = []
+        active.tasks = active.tasks.map(t => t.id === id ? { ...t, ...data, updatedAt: now() } : t)
+        return active.tasks.find(t => t.id === id)
+      },
+      delete: async (id: string) => {
+        const active = getActive()
+        if (!active.tasks) return true
+        active.tasks = active.tasks.filter(t => t.id !== id)
+        return true
       }
     },
     chat: {

@@ -82,6 +82,23 @@ export interface ChatMessage {
   handoffFrom?: string
 }
 
+export interface Task {
+  id: string
+  fromEmployeeId: string
+  toEmployeeId: string
+  priority: 'high' | 'medium' | 'low'
+  deadline: string
+  objective: string
+  context: string
+  deliverable: string
+  acceptanceCriteria: string
+  escalateIf: string
+  status: 'pending' | 'in_progress' | 'completed' | 'escalated'
+  response?: string
+  createdAt: string
+  updatedAt: string
+}
+
 export interface AppSettings {
   providers: ProviderConfig[]
   defaultProvider: string
