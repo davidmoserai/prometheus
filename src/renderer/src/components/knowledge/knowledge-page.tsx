@@ -53,7 +53,7 @@ export function KnowledgePage() {
             <h2 className="text-[28px] font-bold tracking-tight">
               <span className="gradient-text">Knowledge Base</span>
             </h2>
-            <p className="text-text-tertiary text-[15px]" style={{ marginTop: '8px' }}>Shared documents and context for your employees</p>
+            <p className="text-text-tertiary text-[15px]" style={{ marginTop: '8px' }}>Documents assigned to employees are included with every message as context</p>
           </div>
           <Button onClick={() => setIsCreating(true)}>
             <Plus className="w-4 h-4" />

@@ -36,7 +36,7 @@ Tailwind spacing utilities (`p-7`, `mb-5`, `gap-6`, etc.) do NOT render at corre
 - `src/main/index.ts` — Electron entry, IPC handlers (store/agentManager init in `app.whenReady()`)
 - `src/main/store.ts` — EmployeeStore class, JSON persistence, company-scoped data
 - `src/main/types.ts` — All type definitions + DEFAULT_PROVIDERS
-- `src/main/agent-manager.ts` — Chat handler (currently mock, TODO: real LLM integration)
+- `src/main/agent-manager.ts` — Real LLM agent manager (OpenAI-compatible, Anthropic Messages API, Ollama formats; streaming SSE; prompt caching)
 - `src/preload/index.ts` — Secure IPC bridge
 - `src/renderer/src/lib/mock-api.ts` — Mock API for web preview mode
 - `globals.css` — Theme tokens, animations

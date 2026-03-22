@@ -339,7 +339,7 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
               <CardHeader>
                 <CardTitle>Knowledge Base</CardTitle>
                 <CardDescription>
-                  Select documents this employee has access to. These provide context and expertise.
+                  Selected documents are sent with every message as additional context.
                 </CardDescription>
               </CardHeader>
               <CardContent>

@@ -359,6 +359,10 @@ export class EmployeeStore {
     return this.getActiveData().knowledge
   }
 
+  getKnowledge(id: string): KnowledgeDocument | undefined {
+    return this.getActiveData().knowledge.find(k => k.id === id)
+  }
+
   createKnowledge(data: Omit<KnowledgeDocument, 'id' | 'createdAt' | 'updatedAt'>): KnowledgeDocument {
     const doc: KnowledgeDocument = {
       ...data,
