@@ -763,18 +763,41 @@ export class AgentManager {
 
     const messages = [{ role: 'user', content: brief }]
 
+    // Track a live message ID for real-time streaming updates
+    let liveMsg = this.store.addTaskMessage(task.id, { role: 'agent', employeeId: toEmployee.id, content: '...' })
+    const currentTask = this.store.getTask(task.id)
+    if (currentTask) this.onTaskUpdate?.(currentTask)
+
     try {
       const responseText = await this.runAgent(
         provider,
         toEmployee,
         systemPrompt,
         messages,
-        () => {}, // no streaming for background tasks
+        (accumulated) => {
+          // Update the live message with streaming text
+          const t = this.store.getTask(task.id)
+          if (t) {
+            const msgIdx = t.messages.findIndex(m => m.id === liveMsg.id)
+            if (msgIdx >= 0) {
+              t.messages[msgIdx].content = accumulated
+              this.store.updateTask(task.id, { messages: t.messages })
+              this.onTaskUpdate?.(t)
+            }
+          }
+        },
         Object.keys(taskTools).length > 0 ? taskTools : undefined
       )
 
-      // Add agent response to task thread
-      this.store.addTaskMessage(task.id, { role: 'agent', employeeId: toEmployee.id, content: responseText })
+      // Finalize the live message with complete text
+      const finalTask = this.store.getTask(task.id)
+      if (finalTask) {
+        const msgIdx = finalTask.messages.findIndex(m => m.id === liveMsg.id)
+        if (msgIdx >= 0) {
+          finalTask.messages[msgIdx].content = responseText
+          this.store.updateTask(task.id, { messages: finalTask.messages })
+        }
+      }
 
       // Save response but keep as in_progress — user reviews and marks complete
       this.store.updateTask(task.id, {
@@ -852,18 +875,40 @@ export class AgentManager {
       this.onFileWritten
     )
 
+    // Create live message for streaming
+    let continueMsg = this.store.addTaskMessage(taskId, { role: 'agent', employeeId: toEmployee.id, content: '...' })
+    const ct = this.store.getTask(taskId)
+    if (ct) this.onTaskUpdate?.(ct)
+
     try {
       const responseText = await this.runAgent(
         provider,
         toEmployee,
         systemPrompt,
         messages,
-        () => {}, // no streaming for task execution
+        (accumulated) => {
+          const t = this.store.getTask(taskId)
+          if (t) {
+            const msgIdx = t.messages.findIndex(m => m.id === continueMsg.id)
+            if (msgIdx >= 0) {
+              t.messages[msgIdx].content = accumulated
+              this.store.updateTask(taskId, { messages: t.messages })
+              this.onTaskUpdate?.(t)
+            }
+          }
+        },
         Object.keys(taskTools).length > 0 ? taskTools : undefined
       )
 
-      // Add response to thread
-      this.store.addTaskMessage(taskId, { role: 'agent', employeeId: toEmployee.id, content: responseText })
+      // Finalize the live message
+      const ft = this.store.getTask(taskId)
+      if (ft) {
+        const msgIdx = ft.messages.findIndex(m => m.id === continueMsg.id)
+        if (msgIdx >= 0) {
+          ft.messages[msgIdx].content = responseText
+          this.store.updateTask(taskId, { messages: ft.messages })
+        }
+      }
       this.store.updateTask(taskId, { response: responseText })
     } catch (err) {
       const errorMsg = `Error: ${err instanceof Error ? err.message : 'Unknown error'}`
