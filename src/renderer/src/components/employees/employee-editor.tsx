@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ArrowLeft, Save, Sparkles, ArrowRight, Brain, Trash2 } from 'lucide-react'
+import { ArrowLeft, Save, Sparkles, ArrowRight, Brain, Trash2, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -100,7 +100,7 @@ interface EmployeeEditorProps {
 }
 
 export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
-  const { createEmployee, updateEmployee, knowledge, settings, departments } = useAppStore()
+  const { createEmployee, updateEmployee, knowledge, settings, departments, createDepartment } = useAppStore()
   const isEditing = !!employee
 
   // Template selection phase (only for new employees)
@@ -119,9 +119,20 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
   const [model, setModel] = useState(validModel)
   const [permissions, setPermissions] = useState<PermissionSet>(employee?.permissions || DEFAULT_PERMISSIONS)
   const [departmentId, setDepartmentId] = useState<string | null>(employee?.departmentId ?? null)
+  const [creatingDept, setCreatingDept] = useState(false)
+  const [newDeptName, setNewDeptName] = useState('')
+  const [memoryText, setMemoryText] = useState(employee?.memory || '')
   const [activeTab, setActiveTab] = useState<'basic' | 'tools' | 'knowledge' | 'permissions'>('basic')
 
   const enabledProviders = settings?.providers.filter(p => p.enabled || p.id === 'ollama') || []
+
+  const handleCreateDept = async () => {
+    if (!newDeptName.trim()) return
+    const dept = await createDepartment({ name: newDeptName.trim(), color: 'flame' })
+    setDepartmentId(dept.id)
+    setNewDeptName('')
+    setCreatingDept(false)
+  }
 
   // Handle selecting a template
   const handleSelectTemplate = (template: EmployeeTemplate) => {
@@ -364,17 +375,41 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
                   </div>
                   <div>
                     <label className="block text-[13px] font-medium text-text-secondary" style={{ marginBottom: '8px' }}>Department</label>
-                    <select
-                      value={departmentId || ''}
-                      onChange={(e) => setDepartmentId(e.target.value || null)}
-                      className="flex w-full rounded-xl border border-border-default bg-bg-tertiary text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-flame-500/25 cursor-pointer transition-all duration-300"
-                      style={{ height: '44px', padding: '10px 16px', borderRadius: '12px' }}
-                    >
-                      <option value="">No department</option>
-                      {departments.map((d) => (
-                        <option key={d.id} value={d.id}>{d.name}</option>
-                      ))}
-                    </select>
+                    <div className="flex items-center" style={{ gap: '8px' }}>
+                      <select
+                        value={departmentId || ''}
+                        onChange={(e) => {
+                          if (e.target.value === '__create__') {
+                            setCreatingDept(true)
+                          } else {
+                            setDepartmentId(e.target.value || null)
+                          }
+                        }}
+                        className="flex w-full rounded-xl border border-border-default bg-bg-tertiary text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-flame-500/25 cursor-pointer transition-all duration-300"
+                        style={{ height: '44px', padding: '10px 16px', borderRadius: '12px' }}
+                      >
+                        <option value="">No department</option>
+                        {departments.map((d) => (
+                          <option key={d.id} value={d.id}>{d.name}</option>
+                        ))}
+                        <option value="__create__">+ Create new...</option>
+                      </select>
+                    </div>
+                    {creatingDept && (
+                      <div className="flex items-center animate-fade-in" style={{ gap: '8px', marginTop: '8px' }}>
+                        <input
+                          value={newDeptName}
+                          onChange={(e) => setNewDeptName(e.target.value)}
+                          onKeyDown={(e) => e.key === 'Enter' && handleCreateDept()}
+                          placeholder="Department name..."
+                          autoFocus
+                          className="flex-1 rounded-lg bg-bg-tertiary border border-border-default text-[13px] text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-flame-500/30"
+                          style={{ padding: '8px 12px' }}
+                        />
+                        <button onClick={handleCreateDept} className="text-[13px] text-flame-400 font-medium cursor-pointer hover:text-flame-300">Create</button>
+                        <button onClick={() => { setCreatingDept(false); setNewDeptName('') }} className="text-[13px] text-text-tertiary cursor-pointer hover:text-text-secondary">Cancel</button>
+                      </div>
+                    )}
                   </div>
                   </div>
                 </CardContent>
@@ -447,7 +482,7 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
                 </CardContent>
               </Card>
 
-              {/* Memory (read-only, only shown when editing) */}
+              {/* Memory (editable, only shown when editing) */}
               {isEditing && (
                 <Card>
                   <CardHeader>
@@ -456,37 +491,47 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
                       Persistent Memory
                     </CardTitle>
                     <CardDescription>
-                      This employee's long-term memory. Agents save important facts here automatically using the save_memory tool.
+                      Long-term memory that persists across conversations. Agents update this automatically, but you can edit it too.
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
-                    {employee?.memory ? (
-                      <div className="flex flex-col" style={{ gap: '12px' }}>
-                        <Textarea
-                          value={employee.memory}
-                          readOnly
-                          rows={6}
-                          className="font-mono text-[13px] opacity-80 cursor-default"
-                        />
-                        <div className="flex justify-end">
+                    <div className="flex flex-col" style={{ gap: '12px' }}>
+                      <Textarea
+                        value={memoryText}
+                        onChange={(e) => setMemoryText(e.target.value)}
+                        rows={6}
+                        placeholder="No memories yet. The agent will save important facts here during conversations, or you can add context manually."
+                        className="font-mono text-[13px]"
+                      />
+                      <div className="flex justify-between">
+                        {memoryText !== (employee?.memory || '') && (
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={async () => {
+                              await updateEmployee(employee!.id, { memory: memoryText })
+                            }}
+                          >
+                            <Save className="w-3.5 h-3.5" />
+                            Save Memory
+                          </Button>
+                        )}
+                        {memoryText && (
                           <Button
                             variant="ghost"
                             size="sm"
                             onClick={async () => {
-                              await updateEmployee(employee.id, { memory: '' })
+                              await updateEmployee(employee!.id, { memory: '' })
+                              setMemoryText('')
                             }}
-                            className="text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                            className="text-red-400 hover:text-red-300 hover:bg-red-500/10 ml-auto"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
-                            Clear Memory
+                            Clear
                           </Button>
-                        </div>
+                        )}
                       </div>
-                    ) : (
-                      <p className="text-[13px] text-text-tertiary italic">
-                        No memories saved yet. This employee will use save_memory during conversations to remember important information.
-                      </p>
-                    )}
+                    </div>
                   </CardContent>
                 </Card>
               )}
