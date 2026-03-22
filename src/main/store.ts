@@ -11,7 +11,8 @@ import {
   ChatMessage,
   Task,
   AppSettings,
-  DEFAULT_SETTINGS
+  DEFAULT_SETTINGS,
+  DEFAULT_PROVIDERS
 } from './types'
 
 interface CompanyData {
@@ -455,8 +456,26 @@ export class EmployeeStore {
   }
 
   // Settings (global, not per-company)
+  // Models always come from code (DEFAULT_PROVIDERS), user data (apiKey, enabled, baseUrl) from store
   getSettings(): AppSettings {
-    return this.data.settings
+    const saved = this.data.settings
+    const merged = {
+      ...saved,
+      providers: DEFAULT_PROVIDERS.map(defaultProv => {
+        const savedProv = saved.providers.find(p => p.id === defaultProv.id)
+        if (savedProv) {
+          // Keep user's apiKey, enabled, baseUrl — but always use code's models and name
+          return {
+            ...defaultProv,
+            apiKey: savedProv.apiKey,
+            enabled: savedProv.enabled,
+            baseUrl: savedProv.baseUrl || defaultProv.baseUrl
+          }
+        }
+        return defaultProv
+      })
+    }
+    return merged
   }
 
   updateSettings(settings: Partial<AppSettings>): AppSettings {
