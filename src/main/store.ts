@@ -389,7 +389,6 @@ export class EmployeeStore {
   createKnowledge(data: Omit<KnowledgeDocument, 'id' | 'createdAt' | 'updatedAt'>): KnowledgeDocument {
     const doc: KnowledgeDocument = {
       ...data,
-      docType: data.docType ?? 'reference',
       id: uuid(),
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()

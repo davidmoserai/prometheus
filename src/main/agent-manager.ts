@@ -186,8 +186,7 @@ function buildMastraTools(
       const doc = store.createKnowledge({
         title: input.title,
         content: input.content,
-        tags: input.tags || [],
-        docType: 'living'
+        tags: input.tags || []
       })
 
       // Auto-assign to this employee
@@ -322,13 +321,14 @@ function buildMastraTools(
     description: 'Create a recurring scheduled task that runs automatically. Use this to set up daily reports, weekly check-ins, or any recurring work.',
     inputSchema: z.object({
       name: z.string().describe('Short name for the task'),
-      employee_id: z.string().describe('ID of the employee who should execute this task (use your own ID to schedule for yourself)'),
+      employee_id: z.string().optional().describe('ID of the employee who should execute this task. Omit to assign to yourself.'),
       brief: z.string().describe('The task description/instructions to execute each time'),
       schedule: z.enum(['hourly', 'daily', 'weekly']).describe('How often to run'),
       schedule_time: z.string().optional().describe('When to run, e.g. "08:00" for daily or "monday 09:00" for weekly')
     }),
     execute: async (input) => {
       try {
+        const targetEmployeeId = input.employee_id || employee.id
         const schedule = input.schedule
         const now = new Date()
         let nextRunAt: Date
@@ -342,7 +342,7 @@ function buildMastraTools(
         }
 
         const recurringTask = store.createRecurringTask({
-          employeeId: input.employee_id,
+          employeeId: targetEmployeeId,
           name: input.name,
           brief: input.brief,
           schedule,
@@ -749,7 +749,9 @@ export class AgentManager {
    * Build the full system prompt including knowledge docs, memory, and team info.
    */
   private buildSystemPrompt(employee: Employee): string {
-    let prompt = employee.systemPrompt || ''
+    // Name and role at the top, then the custom system prompt
+    let prompt = `You are ${employee.name}, ${employee.role}.\n\n`
+    prompt += employee.systemPrompt || ''
 
     // Append memory section
     prompt += '\n\n---\n\n# Your Memory'
@@ -773,9 +775,6 @@ export class AgentManager {
         }
       }
     }
-
-    // Append employee identity
-    prompt += `\n\n---\n\nYour ID: ${employee.id}\nYour name: ${employee.name}`
 
     // Append team delegation info
     const contactable = this.getContactableEmployees(employee)

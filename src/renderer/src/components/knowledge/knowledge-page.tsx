@@ -115,20 +115,13 @@ export function KnowledgePage() {
                     </div>
                   </div>
 
-                  {/* Doc type badge */}
-                  <div className="relative flex items-center flex-wrap" style={{ gap: '6px', marginBottom: '16px' }}>
-                    <Badge variant="secondary">
-                      {doc.docType === 'living' ? 'Living' : 'Reference'}
-                    </Badge>
-                  </div>
-
                   <p className="relative text-[13px] text-text-tertiary line-clamp-3 leading-relaxed" style={{ marginBottom: '16px' }}>
                     {doc.content.slice(0, 200)}{doc.content.length > 200 ? '...' : ''}
                   </p>
                   <div className="relative flex items-center flex-wrap" style={{ gap: '8px' }}>
                     {doc.tags.map((tag) => (
                       <Badge key={tag} variant="secondary">
-                        <Tag className="w-2.5 h-2.5 mr-1" />
+                        <Tag className="w-2.5 h-2.5 shrink-0" style={{ marginRight: '6px' }} />
                         {tag}
                       </Badge>
                     ))}
@@ -168,14 +161,13 @@ function KnowledgeEditor({
   onClose
 }: {
   document?: KnowledgeDocument
-  onSave: (data: { title: string; content: string; tags: string[]; docType: 'living' | 'reference' }) => Promise<void>
+  onSave: (data: { title: string; content: string; tags: string[] }) => Promise<void>
   onClose: () => void
 }) {
   const [title, setTitle] = useState(document?.title || '')
   const [content, setContent] = useState(document?.content || '')
   const [tags, setTags] = useState<string[]>(document?.tags || [])
   const [tagInput, setTagInput] = useState('')
-  const [docType, setDocType] = useState<'living' | 'reference'>(document?.docType || 'reference')
 
   const handleAddTag = () => {
     const tag = tagInput.trim().toLowerCase()
@@ -199,7 +191,7 @@ function KnowledgeEditor({
               <span className="gradient-text">{document ? 'Edit Document' : 'New Document'}</span>
             </h2>
           </div>
-          <Button onClick={() => onSave({ title, content, tags, docType })} disabled={!title.trim()}>
+          <Button onClick={() => onSave({ title, content, tags })} disabled={!title.trim()}>
             <Save className="w-4 h-4" />
             Save
           </Button>
@@ -231,47 +223,6 @@ function KnowledgeEditor({
               />
             </div>
             </div>
-          </CardContent>
-        </Card>
-
-        {/* Document Type */}
-        <Card style={{ marginBottom: '16px' }}>
-          <CardHeader>
-            <CardTitle>Document Type</CardTitle>
-            <CardDescription>Categorize how this document is used</CardDescription>
-          </CardHeader>
-          <CardContent>
-              <div>
-                <div className="flex rounded-xl bg-bg-tertiary border border-border-default overflow-hidden" style={{ padding: '4px' }}>
-                  <button
-                    onClick={() => setDocType('living')}
-                    className={`flex-1 rounded-lg text-[13px] font-medium transition-all duration-300 cursor-pointer ${
-                      docType === 'living'
-                        ? 'bg-white/[0.07] text-text-primary shadow-[0_0_16px_-4px_rgba(249,115,22,0.1)]'
-                        : 'text-text-tertiary hover:text-text-secondary'
-                    }`}
-                    style={{ padding: '8px 16px' }}
-                  >
-                    Living
-                  </button>
-                  <button
-                    onClick={() => setDocType('reference')}
-                    className={`flex-1 rounded-lg text-[13px] font-medium transition-all duration-300 cursor-pointer ${
-                      docType === 'reference'
-                        ? 'bg-white/[0.07] text-text-primary shadow-[0_0_16px_-4px_rgba(249,115,22,0.1)]'
-                        : 'text-text-tertiary hover:text-text-secondary'
-                    }`}
-                    style={{ padding: '8px 16px' }}
-                  >
-                    Reference
-                  </button>
-                </div>
-                <p className="text-[12px] text-text-tertiary" style={{ marginTop: '6px' }}>
-                  {docType === 'living'
-                    ? 'Frequently changing content — agents will update automatically'
-                    : 'Stable content that rarely changes'}
-                </p>
-              </div>
           </CardContent>
         </Card>
 

@@ -93,13 +93,13 @@ export function EmployeesPage() {
         <div className="flex items-center flex-wrap" style={{ gap: '10px', marginBottom: '32px' }}>
           {departments.map((dept) => (
             <div key={dept.id} className="group flex items-center" style={{ gap: '6px' }}>
-              <Badge variant="secondary" className="pr-1.5">
-                <span className={`inline-block w-2 h-2 rounded-full bg-${dept.color}-400 mr-1.5`} />
+              <Badge variant="secondary" style={{ gap: '8px' }}>
+                <span className={`inline-block w-2 h-2 rounded-full bg-${dept.color}-400 shrink-0`} />
                 {dept.name}
                 <button
                   onClick={() => deleteDepartment(dept.id)}
                   className="rounded hover:bg-white/[0.1] opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
-                  style={{ marginLeft: '6px', padding: '2px' }}
+                  style={{ padding: '2px' }}
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>
@@ -302,10 +302,10 @@ function EmployeeCard({
             </div>
           </div>
           <p className="text-[13px] text-text-tertiary truncate" style={{ marginTop: '6px' }}>{employee.role}</p>
-          <div className="flex items-center" style={{ gap: '8px', marginTop: '20px' }}>
+          <div className="flex items-center flex-wrap" style={{ gap: '8px', marginTop: '20px' }}>
             {department && (
               <Badge variant="secondary">
-                <span className={`inline-block w-2 h-2 rounded-full bg-${department.color}-400 mr-1.5`} />
+                <span className={`inline-block w-2 h-2 rounded-full bg-${department.color}-400 shrink-0`} style={{ marginRight: '6px' }} />
                 {department.name}
               </Badge>
             )}

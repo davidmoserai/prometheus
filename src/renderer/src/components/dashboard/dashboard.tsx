@@ -175,7 +175,7 @@ export function Dashboard() {
                     </div>
                     {dept && (
                       <Badge variant="secondary">
-                        <span className={`inline-block w-2 h-2 rounded-full bg-${dept.color}-400 mr-1.5`} />
+                        <span className={`inline-block w-2 h-2 rounded-full bg-${dept.color}-400 shrink-0`} style={{ marginRight: '6px' }} />
                         {dept.name}
                       </Badge>
                     )}

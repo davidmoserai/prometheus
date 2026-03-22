@@ -61,7 +61,6 @@ export interface KnowledgeDocument {
   title: string
   content: string
   tags: string[]
-  docType: 'living' | 'reference'
   createdAt: string
   updatedAt: string
 }

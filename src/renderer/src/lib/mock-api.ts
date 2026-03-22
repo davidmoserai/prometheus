@@ -54,7 +54,6 @@ interface KnowledgeDocument {
   title: string
   content: string
   tags: string[]
-  docType: 'living' | 'reference'
   createdAt: string
   updatedAt: string
 }
@@ -203,7 +202,6 @@ let companyData: Record<string, CompanyData> = {
         title: 'Company Brand Guidelines',
         content: '# Brand Guidelines\n\n## Voice & Tone\n- Professional yet approachable\n- Clear and concise\n- Technically accurate\n\n## Values\n- Innovation first\n- User-centric design\n- Transparency in all communications',
         tags: ['brand', 'guidelines'],
-        docType: 'living',
         createdAt: now(),
         updatedAt: now()
       },
@@ -212,7 +210,6 @@ let companyData: Record<string, CompanyData> = {
         title: 'Code Standards',
         content: '# Code Standards\n\n## TypeScript\n- Use strict mode\n- Prefer interfaces over types\n- No `any` types\n\n## React\n- Functional components only\n- Use hooks for state\n- Keep components small and focused',
         tags: ['code', 'standards', 'engineering'],
-        docType: 'reference',
         createdAt: now(),
         updatedAt: now()
       }
