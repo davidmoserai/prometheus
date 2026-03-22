@@ -1,4 +1,7 @@
-import { readFileSync, writeFileSync } from 'fs'
+import { readFileSync, writeFileSync, mkdtempSync, unlinkSync } from 'fs'
+import { execSync } from 'child_process'
+import { join } from 'path'
+import { tmpdir } from 'os'
 import { Agent } from '@mastra/core/agent'
 import { createTool } from '@mastra/core/tools'
 import { z } from 'zod'
@@ -290,13 +293,52 @@ function buildMastraTools(
   if (enabledToolIds.has('code-execute')) {
     tools.execute_code = createTool({
       id: 'execute_code',
-      description: 'Execute code in a sandboxed environment',
+      description: 'Execute code locally. Supports python and javascript/node. Code runs with a 30 second timeout. Output (stdout + stderr) is returned.',
       inputSchema: z.object({
-        language: z.string().describe('Programming language (e.g. python, javascript)'),
+        language: z.enum(['python', 'javascript', 'node', 'bash', 'sh']).describe('Programming language'),
         code: z.string().describe('The code to execute')
       }),
       execute: async (input) => {
-        return { result: `Code execution is not yet available in sandbox. Language: ${input.language}, Code length: ${input.code?.length || 0} chars.` }
+        const lang = input.language.toLowerCase()
+        try {
+          const tempDir = mkdtempSync(join(tmpdir(), 'prometheus-exec-'))
+          let filePath: string
+          let cmd: string
+
+          if (lang === 'python') {
+            filePath = join(tempDir, 'script.py')
+            writeFileSync(filePath, input.code)
+            cmd = `python3 "${filePath}"`
+          } else if (lang === 'javascript' || lang === 'node') {
+            filePath = join(tempDir, 'script.js')
+            writeFileSync(filePath, input.code)
+            cmd = `node "${filePath}"`
+          } else if (lang === 'bash' || lang === 'sh') {
+            filePath = join(tempDir, 'script.sh')
+            writeFileSync(filePath, input.code)
+            cmd = `bash "${filePath}"`
+          } else {
+            return { result: `Unsupported language: ${lang}. Use python, javascript, or bash.` }
+          }
+
+          const output = execSync(cmd, {
+            timeout: 30000,
+            maxBuffer: 1024 * 1024,
+            encoding: 'utf-8',
+            cwd: tempDir
+          })
+
+          // Clean up
+          try { unlinkSync(filePath) } catch {}
+
+          return { result: output.slice(0, 5000) || '(no output)' }
+        } catch (err) {
+          const error = err as { stderr?: string; stdout?: string; message?: string }
+          const stderr = error.stderr || ''
+          const stdout = error.stdout || ''
+          const output = [stdout, stderr].filter(Boolean).join('\n').slice(0, 5000)
+          return { result: output || `Execution failed: ${error.message || 'Unknown error'}` }
+        }
       }
     })
   }
