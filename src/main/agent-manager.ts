@@ -781,23 +781,29 @@ export class AgentManager {
 
     const messages = [{ role: 'user', content: brief }]
 
-    const responseText = await this.runAgent(
-      provider,
-      toEmployee,
-      systemPrompt,
-      messages,
-      () => {}, // no streaming for background tasks
-      Object.keys(taskTools).length > 0 ? taskTools : undefined
-    )
+    try {
+      const responseText = await this.runAgent(
+        provider,
+        toEmployee,
+        systemPrompt,
+        messages,
+        () => {}, // no streaming for background tasks
+        Object.keys(taskTools).length > 0 ? taskTools : undefined
+      )
 
-    // Add agent response to task thread
-    this.store.addTaskMessage(task.id, { role: 'agent', employeeId: toEmployee.id, content: responseText })
+      // Add agent response to task thread
+      this.store.addTaskMessage(task.id, { role: 'agent', employeeId: toEmployee.id, content: responseText })
 
-    // Save response but keep as in_progress — user reviews and marks complete
-    this.store.updateTask(task.id, {
-      status: 'in_progress',
-      response: responseText
-    })
+      // Save response but keep as in_progress — user reviews and marks complete
+      this.store.updateTask(task.id, {
+        status: 'in_progress',
+        response: responseText
+      })
+    } catch (err) {
+      const errorMsg = `Error: ${err instanceof Error ? err.message : 'Unknown error'}`
+      this.store.addTaskMessage(task.id, { role: 'tool', content: errorMsg })
+      this.store.updateTask(task.id, { status: 'escalated' })
+    }
 
     const updated = this.store.getTask(task.id)
     if (updated) this.onTaskUpdate?.(updated)
@@ -861,18 +867,24 @@ export class AgentManager {
       this.onFileWritten
     )
 
-    const responseText = await this.runAgent(
-      provider,
-      toEmployee,
-      systemPrompt,
-      messages,
-      () => {}, // no streaming for task execution
-      Object.keys(taskTools).length > 0 ? taskTools : undefined
-    )
+    try {
+      const responseText = await this.runAgent(
+        provider,
+        toEmployee,
+        systemPrompt,
+        messages,
+        () => {}, // no streaming for task execution
+        Object.keys(taskTools).length > 0 ? taskTools : undefined
+      )
 
-    // Add response to thread
-    this.store.addTaskMessage(taskId, { role: 'agent', employeeId: toEmployee.id, content: responseText })
-    this.store.updateTask(taskId, { response: responseText })
+      // Add response to thread
+      this.store.addTaskMessage(taskId, { role: 'agent', employeeId: toEmployee.id, content: responseText })
+      this.store.updateTask(taskId, { response: responseText })
+    } catch (err) {
+      const errorMsg = `Error: ${err instanceof Error ? err.message : 'Unknown error'}`
+      this.store.addTaskMessage(taskId, { role: 'tool', content: errorMsg })
+      this.store.updateTask(taskId, { status: 'escalated' })
+    }
 
     const updated = this.store.getTask(taskId)
     if (updated) this.onTaskUpdate?.(updated)

@@ -81,6 +81,7 @@ export function TasksPage() {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
   const [replyText, setReplyText] = useState('')
   const [isReplying, setIsReplying] = useState(false)
+  const [replyError, setReplyError] = useState<string | null>(null)
   const [showScheduledForm, setShowScheduledForm] = useState(false)
   const [editingRecurringId, setEditingRecurringId] = useState<string | null>(null)
   const [scheduledForm, setScheduledForm] = useState({
@@ -120,10 +121,17 @@ export function TasksPage() {
 
   const handleReply = async (taskId: string) => {
     if (!replyText.trim() || isReplying) return
+    const keepExpanded = taskId
     setIsReplying(true)
+    setReplyError(null)
     try {
       await replyToTask(taskId, replyText.trim())
       setReplyText('')
+      // Re-expand the task after loadTasks resets state
+      setTimeout(() => setExpandedTaskId(keepExpanded), 50)
+    } catch (err) {
+      setReplyError(err instanceof Error ? err.message : 'Failed to send reply')
+      setTimeout(() => setExpandedTaskId(keepExpanded), 50)
     } finally {
       setIsReplying(false)
     }
@@ -596,6 +604,11 @@ export function TasksPage() {
                                         {isReplying ? 'Sending...' : 'Send'}
                                       </Button>
                                     </div>
+                                    {replyError && expandedTaskId === task.id && (
+                                      <div className="rounded-lg bg-ember-500/10 border border-ember-500/20" style={{ padding: '10px 14px', marginTop: '8px' }}>
+                                        <p className="text-[12px] text-ember-400">{replyError}</p>
+                                      </div>
+                                    )}
                                   </div>
                                 )}
 
