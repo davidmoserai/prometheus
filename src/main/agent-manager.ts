@@ -755,7 +755,19 @@ export class AgentManager {
     // Build system prompt for target employee
     const systemPrompt = this.buildSystemPrompt(toEmployee)
 
-    // Send to LLM (no tools for task execution — just get the response)
+    // Build tools for the target agent so they can read files, write files, etc.
+    const contactable = this.getContactableEmployees(toEmployee)
+    const taskTools = buildMastraTools(
+      this.store,
+      toEmployee,
+      undefined, // no conversation context
+      contactable,
+      (fromEmp, args, convId) => this.handleDelegateTask(fromEmp, args, convId),
+      (fromEmp, toId, msg) => this.executeAgentMessage(fromEmp, toId, msg),
+      undefined, // no tool call UI callback for background tasks
+      this.onFileWritten
+    )
+
     const messages = [{ role: 'user', content: brief }]
 
     const responseText = await this.runAgent(
@@ -764,17 +776,17 @@ export class AgentManager {
       systemPrompt,
       messages,
       () => {}, // no streaming for background tasks
-      undefined  // no tools
+      Object.keys(taskTools).length > 0 ? taskTools : undefined
     )
 
-    // Save response and mark completed
+    // Save response but keep as in_progress — user reviews and marks complete
     this.store.updateTask(task.id, {
-      status: 'completed',
+      status: 'in_progress',
       response: responseText
     })
 
-    const completed = this.store.getTask(task.id)
-    if (completed) this.onTaskUpdate?.(completed)
+    const updated = this.store.getTask(task.id)
+    if (updated) this.onTaskUpdate?.(updated)
   }
 
   /**
