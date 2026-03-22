@@ -8,11 +8,16 @@ import {
   PlayCircle,
   CheckCircle2,
   Trash2,
-  ArrowUpRight
+  ArrowUpRight,
+  CalendarClock,
+  Plus,
+  X,
+  Pencil
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { useAppStore, type Task } from '@/stores/app-store'
+import { Switch } from '@/components/ui/switch'
+import { useAppStore, type Task, type RecurringTask } from '@/stores/app-store'
 
 const STATUS_CONFIG = {
   escalated: {
@@ -58,9 +63,28 @@ const PRIORITY_CONFIG = {
 const STATUS_ORDER: Task['status'][] = ['escalated', 'pending', 'in_progress', 'completed']
 
 export function TasksPage() {
-  const { tasks, employees, updateTask, deleteTask } = useAppStore()
+  const {
+    tasks,
+    employees,
+    recurringTasks,
+    updateTask,
+    deleteTask,
+    createRecurringTask,
+    updateRecurringTask,
+    deleteRecurringTask
+  } = useAppStore()
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null)
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
+  const [showScheduledForm, setShowScheduledForm] = useState(false)
+  const [editingRecurringId, setEditingRecurringId] = useState<string | null>(null)
+  const [scheduledForm, setScheduledForm] = useState({
+    employeeId: '',
+    name: '',
+    brief: '',
+    schedule: 'daily' as RecurringTask['schedule'],
+    scheduleTime: '08:00',
+    enabled: true
+  })
 
   // Group tasks by status
   const grouped = STATUS_ORDER.map(status => ({
@@ -92,6 +116,79 @@ export function TasksPage() {
     await updateTask(taskId, { status: newStatus })
   }
 
+  const calculateNextRun = (schedule: RecurringTask['schedule'], scheduleTime?: string): string => {
+    const now = new Date()
+    if (schedule === 'hourly') return new Date(now.getTime() + 60 * 60 * 1000).toISOString()
+    if (schedule === 'daily') {
+      const [h, m] = (scheduleTime || '08:00').split(':').map(Number)
+      const next = new Date(now)
+      next.setHours(h, m, 0, 0)
+      if (next <= now) next.setDate(next.getDate() + 1)
+      return next.toISOString()
+    }
+    // weekly
+    const parts = (scheduleTime || 'monday 08:00').split(' ')
+    const dayName = parts[0]?.toLowerCase() || 'monday'
+    const [h, m] = (parts[1] || '08:00').split(':').map(Number)
+    const dayMap: Record<string, number> = { sunday: 0, monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6 }
+    const targetDay = dayMap[dayName] ?? 1
+    const next = new Date(now)
+    next.setHours(h, m, 0, 0)
+    let daysUntil = targetDay - next.getDay()
+    if (daysUntil < 0) daysUntil += 7
+    if (daysUntil === 0 && next <= now) daysUntil = 7
+    next.setDate(next.getDate() + daysUntil)
+    return next.toISOString()
+  }
+
+  const handleScheduledSubmit = async () => {
+    if (!scheduledForm.name || !scheduledForm.employeeId || !scheduledForm.brief) return
+    const timeValue = scheduledForm.schedule === 'weekly'
+      ? `monday ${scheduledForm.scheduleTime}`
+      : scheduledForm.scheduleTime
+
+    if (editingRecurringId) {
+      await updateRecurringTask(editingRecurringId, {
+        employeeId: scheduledForm.employeeId,
+        name: scheduledForm.name,
+        brief: scheduledForm.brief,
+        schedule: scheduledForm.schedule,
+        scheduleTime: timeValue,
+        enabled: scheduledForm.enabled,
+        nextRunAt: calculateNextRun(scheduledForm.schedule, timeValue)
+      })
+    } else {
+      await createRecurringTask({
+        employeeId: scheduledForm.employeeId,
+        name: scheduledForm.name,
+        brief: scheduledForm.brief,
+        schedule: scheduledForm.schedule,
+        scheduleTime: timeValue,
+        enabled: scheduledForm.enabled,
+        lastRunAt: null,
+        nextRunAt: calculateNextRun(scheduledForm.schedule, timeValue)
+      })
+    }
+    setShowScheduledForm(false)
+    setEditingRecurringId(null)
+    setScheduledForm({ employeeId: '', name: '', brief: '', schedule: 'daily', scheduleTime: '08:00', enabled: true })
+  }
+
+  const handleEditRecurring = (task: RecurringTask) => {
+    const time = task.scheduleTime || '08:00'
+    const cleanTime = task.schedule === 'weekly' ? time.split(' ')[1] || '08:00' : time
+    setScheduledForm({
+      employeeId: task.employeeId,
+      name: task.name,
+      brief: task.brief,
+      schedule: task.schedule,
+      scheduleTime: cleanTime,
+      enabled: task.enabled
+    })
+    setEditingRecurringId(task.id)
+    setShowScheduledForm(true)
+  }
+
   return (
     <div className="h-full overflow-y-auto">
       <div className="relative max-w-[960px] mx-auto" style={{ padding: '48px' }}>
@@ -109,6 +206,193 @@ export function TasksPage() {
               Inter-agent tasks created when employees delegate work to each other
             </p>
           </div>
+        </div>
+
+        {/* Scheduled Tasks Section */}
+        <div style={{ marginBottom: '48px' }}>
+          <div className="flex items-center justify-between" style={{ marginBottom: '20px' }}>
+            <div className="flex items-center" style={{ gap: '10px' }}>
+              <CalendarClock className="w-[18px] h-[18px] text-flame-400" />
+              <span className="text-[15px] font-semibold text-text-primary tracking-tight">Scheduled Tasks</span>
+              <span className="text-[13px] text-text-tertiary tabular-nums">{recurringTasks.length}</span>
+            </div>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                setShowScheduledForm(true)
+                setEditingRecurringId(null)
+                setScheduledForm({ employeeId: '', name: '', brief: '', schedule: 'daily', scheduleTime: '08:00', enabled: true })
+              }}
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Schedule Task
+            </Button>
+          </div>
+
+          {/* Scheduled form */}
+          {showScheduledForm && (
+            <div
+              className="rounded-2xl bg-bg-elevated border border-border-default animate-fade-in"
+              style={{ padding: '24px', marginBottom: '20px' }}
+            >
+              <div className="flex items-center justify-between" style={{ marginBottom: '20px' }}>
+                <h4 className="text-[14px] font-semibold text-text-primary">
+                  {editingRecurringId ? 'Edit Scheduled Task' : 'New Scheduled Task'}
+                </h4>
+                <button
+                  onClick={() => { setShowScheduledForm(false); setEditingRecurringId(null) }}
+                  className="text-text-tertiary hover:text-text-primary transition-colors cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="flex flex-col" style={{ gap: '16px' }}>
+                {/* Employee select */}
+                <div>
+                  <label className="text-[12px] text-text-tertiary font-medium" style={{ display: 'block', marginBottom: '6px' }}>Assign to Employee</label>
+                  <select
+                    value={scheduledForm.employeeId}
+                    onChange={(e) => setScheduledForm(f => ({ ...f, employeeId: e.target.value }))}
+                    className="w-full rounded-xl bg-bg-tertiary border border-border-default text-[13px] text-text-primary focus:outline-none focus:ring-2 focus:ring-flame-500/25 focus:border-flame-500/40"
+                    style={{ padding: '10px 14px' }}
+                  >
+                    <option value="">Select employee...</option>
+                    {employees.map(e => (
+                      <option key={e.id} value={e.id}>{e.avatar} {e.name} — {e.role}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Name */}
+                <div>
+                  <label className="text-[12px] text-text-tertiary font-medium" style={{ display: 'block', marginBottom: '6px' }}>Task Name</label>
+                  <input
+                    type="text"
+                    value={scheduledForm.name}
+                    onChange={(e) => setScheduledForm(f => ({ ...f, name: e.target.value }))}
+                    placeholder="e.g. Daily standup report"
+                    className="w-full rounded-xl bg-bg-tertiary border border-border-default text-[13px] text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-flame-500/25 focus:border-flame-500/40"
+                    style={{ padding: '10px 14px' }}
+                  />
+                </div>
+
+                {/* Brief */}
+                <div>
+                  <label className="text-[12px] text-text-tertiary font-medium" style={{ display: 'block', marginBottom: '6px' }}>Brief / Instructions</label>
+                  <textarea
+                    value={scheduledForm.brief}
+                    onChange={(e) => setScheduledForm(f => ({ ...f, brief: e.target.value }))}
+                    placeholder="Describe what the employee should do..."
+                    rows={3}
+                    className="w-full rounded-xl bg-bg-tertiary border border-border-default text-[13px] text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-flame-500/25 focus:border-flame-500/40 resize-none"
+                    style={{ padding: '10px 14px' }}
+                  />
+                </div>
+
+                {/* Schedule type + time */}
+                <div className="flex" style={{ gap: '12px' }}>
+                  <div className="flex-1">
+                    <label className="text-[12px] text-text-tertiary font-medium" style={{ display: 'block', marginBottom: '6px' }}>Schedule</label>
+                    <select
+                      value={scheduledForm.schedule}
+                      onChange={(e) => setScheduledForm(f => ({ ...f, schedule: e.target.value as RecurringTask['schedule'] }))}
+                      className="w-full rounded-xl bg-bg-tertiary border border-border-default text-[13px] text-text-primary focus:outline-none focus:ring-2 focus:ring-flame-500/25 focus:border-flame-500/40"
+                      style={{ padding: '10px 14px' }}
+                    >
+                      <option value="hourly">Hourly</option>
+                      <option value="daily">Daily</option>
+                      <option value="weekly">Weekly</option>
+                    </select>
+                  </div>
+                  {scheduledForm.schedule !== 'hourly' && (
+                    <div className="flex-1">
+                      <label className="text-[12px] text-text-tertiary font-medium" style={{ display: 'block', marginBottom: '6px' }}>Time</label>
+                      <input
+                        type="time"
+                        value={scheduledForm.scheduleTime}
+                        onChange={(e) => setScheduledForm(f => ({ ...f, scheduleTime: e.target.value }))}
+                        className="w-full rounded-xl bg-bg-tertiary border border-border-default text-[13px] text-text-primary focus:outline-none focus:ring-2 focus:ring-flame-500/25 focus:border-flame-500/40"
+                        style={{ padding: '10px 14px' }}
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {/* Submit */}
+                <div className="flex justify-end" style={{ gap: '8px' }}>
+                  <Button variant="secondary" size="sm" onClick={() => { setShowScheduledForm(false); setEditingRecurringId(null) }}>
+                    Cancel
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={handleScheduledSubmit}
+                    disabled={!scheduledForm.name || !scheduledForm.employeeId || !scheduledForm.brief}
+                  >
+                    {editingRecurringId ? 'Update' : 'Create'}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Recurring task cards */}
+          {recurringTasks.length > 0 ? (
+            <div className="flex flex-col" style={{ gap: '10px' }}>
+              {recurringTasks.map((rt, i) => {
+                const emp = employees.find(e => e.id === rt.employeeId)
+                const scheduleLabel = rt.schedule === 'hourly' ? 'Every hour' : rt.schedule === 'daily' ? `Daily at ${rt.scheduleTime || '08:00'}` : `Weekly — ${rt.scheduleTime || 'monday 08:00'}`
+
+                return (
+                  <div
+                    key={rt.id}
+                    className="group relative flex items-center rounded-xl bg-bg-elevated border border-border-default hover:border-border-bright transition-all duration-300"
+                    style={{
+                      padding: '16px 20px',
+                      gap: '16px',
+                      animationDelay: `${i * 60}ms`,
+                      animation: 'scale-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) both'
+                    }}
+                  >
+                    <Switch
+                      checked={rt.enabled}
+                      onCheckedChange={(checked) => updateRecurringTask(rt.id, { enabled: checked })}
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center" style={{ gap: '8px', marginBottom: '4px' }}>
+                        <p className="text-[13px] font-medium text-text-primary truncate">{rt.name}</p>
+                        <Badge variant="secondary" className="text-[11px]">{scheduleLabel}</Badge>
+                      </div>
+                      <div className="flex items-center text-[11px] text-text-tertiary" style={{ gap: '12px' }}>
+                        <span>{emp ? `${emp.avatar} ${emp.name}` : 'Unknown'}</span>
+                        {rt.lastRunAt && <span>Last: {new Date(rt.lastRunAt).toLocaleString()}</span>}
+                        <span>Next: {new Date(rt.nextRunAt).toLocaleString()}</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity" style={{ gap: '4px' }}>
+                      <button
+                        onClick={() => handleEditRecurring(rt)}
+                        className="p-1.5 rounded-lg text-text-tertiary hover:text-text-primary hover:bg-white/[0.05] transition-all cursor-pointer"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={() => deleteRecurringTask(rt.id)}
+                        className="p-1.5 rounded-lg text-text-tertiary hover:text-rose-400 hover:bg-white/[0.05] transition-all cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          ) : !showScheduledForm ? (
+            <p className="text-[13px] text-text-tertiary text-center" style={{ padding: '20px 0' }}>
+              No scheduled tasks yet. Create one to automate recurring work.
+            </p>
+          ) : null}
         </div>
 
         {/* Task Groups */}

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Send, Plus, MessageSquare, ChevronLeft, Users, ArrowRight, Flame, Trash2 } from 'lucide-react'
+import { Send, Plus, MessageSquare, ChevronLeft, Users, ArrowRight, Trash2, Minimize2, FileText, Download } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -19,11 +19,16 @@ export function ChatPage() {
     deleteConversation,
     sendMessage,
     setActiveView,
-    setCreatingEmployee
+    setCreatingEmployee,
+    getTokenCount,
+    compressConversation
   } = useAppStore()
 
   const [input, setInput] = useState('')
   const [isSending, setIsSending] = useState(false)
+  const [tokenCount, setTokenCount] = useState(0)
+  const [isCompressing, setIsCompressing] = useState(false)
+  const [writtenFiles, setWrittenFiles] = useState<{ path: string; content: string }[]>([])
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
@@ -40,6 +45,26 @@ export function ChatPage() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [activeConversation?.messages, currentStreaming])
+
+  // Update token count when conversation changes
+  useEffect(() => {
+    if (selectedConversationId) {
+      getTokenCount(selectedConversationId).then(setTokenCount)
+    } else {
+      setTokenCount(0)
+    }
+  }, [selectedConversationId, activeConversation?.messages?.length, getTokenCount])
+
+  // Listen for file-written events
+  useEffect(() => {
+    if (!window.api?.chat?.onFileWritten) return
+    const unsub = window.api.chat.onFileWritten((data) => {
+      if (data.conversationId === selectedConversationId) {
+        setWrittenFiles(prev => [...prev, { path: data.path, content: data.content }])
+      }
+    })
+    return () => { unsub() }
+  }, [selectedConversationId])
 
   const handleSend = async () => {
     if (!input.trim() || isSending) return
@@ -59,6 +84,18 @@ export function ChatPage() {
     } finally {
       setIsSending(false)
       inputRef.current?.focus()
+    }
+  }
+
+  const handleCompress = async () => {
+    if (!selectedConversationId || isCompressing) return
+    setIsCompressing(true)
+    try {
+      await compressConversation(selectedConversationId)
+      const count = await getTokenCount(selectedConversationId)
+      setTokenCount(count)
+    } finally {
+      setIsCompressing(false)
     }
   }
 
@@ -195,6 +232,24 @@ export function ChatPage() {
       <div className="flex-1 flex flex-col relative">
         {activeConversation ? (
           <>
+            {/* Token counter header */}
+            <div className="flex items-center justify-end border-b border-border-default" style={{ padding: '8px 32px', gap: '12px' }}>
+              <span className="text-[11px] text-text-tertiary tabular-nums">
+                ~{tokenCount.toLocaleString()} tokens
+              </span>
+              {tokenCount > 4000 && (
+                <button
+                  onClick={handleCompress}
+                  disabled={isCompressing}
+                  className="flex items-center text-[11px] text-flame-400 hover:text-flame-300 transition-colors cursor-pointer disabled:opacity-50"
+                  style={{ gap: '4px' }}
+                >
+                  <Minimize2 className="w-3 h-3" />
+                  {isCompressing ? 'Compressing...' : 'Compress'}
+                </button>
+              )}
+            </div>
+
             {/* Messages */}
             <div className="flex-1 overflow-y-auto flex flex-col" style={{ paddingLeft: '32px', paddingRight: '32px', paddingTop: '24px', paddingBottom: '24px', gap: '20px' }}>
               {activeConversation.messages.map((msg) => (
@@ -214,6 +269,36 @@ export function ChatPage() {
                   </div>
                 </div>
               )}
+              {/* Written file cards */}
+              {writtenFiles.map((file, i) => (
+                <div
+                  key={`file-${i}`}
+                  className="flex items-center rounded-xl bg-emerald-500/[0.06] border border-emerald-500/20 animate-fade-in"
+                  style={{ gap: '12px', padding: '12px 16px' }}
+                >
+                  <FileText className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[13px] text-text-primary truncate">{file.path.split('/').pop()}</p>
+                    <p className="text-[11px] text-text-tertiary truncate">{file.path}</p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      const blob = new Blob([file.content], { type: 'text/plain' })
+                      const url = URL.createObjectURL(blob)
+                      const a = document.createElement('a')
+                      a.href = url
+                      a.download = file.path.split('/').pop() || 'file'
+                      a.click()
+                      URL.revokeObjectURL(url)
+                    }}
+                    className="flex items-center text-[11px] text-emerald-400 hover:text-emerald-300 transition-colors cursor-pointer"
+                    style={{ gap: '4px' }}
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    Download
+                  </button>
+                </div>
+              ))}
               <div ref={messagesEndRef} />
             </div>
 

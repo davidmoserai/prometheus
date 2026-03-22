@@ -1,3 +1,4 @@
+import { readFileSync, writeFileSync } from 'fs'
 import { EmployeeStore } from './store'
 import { ChatMessage, Employee, ProviderConfig, Task } from './types'
 
@@ -9,6 +10,7 @@ import { ChatMessage, Employee, ProviderConfig, Task } from './types'
 export class AgentManager {
   private store: EmployeeStore
   private onTaskUpdate?: (task: Task) => void
+  private onFileWritten?: (data: { conversationId: string; path: string; content: string }) => void
 
   constructor(store: EmployeeStore) {
     this.store = store
@@ -17,6 +19,11 @@ export class AgentManager {
   /** Set callback for notifying frontend when tasks are created/updated */
   setTaskUpdateCallback(cb: (task: Task) => void) {
     this.onTaskUpdate = cb
+  }
+
+  /** Set callback for notifying frontend when a file is written by a tool */
+  setFileWrittenCallback(cb: (data: { conversationId: string; path: string; content: string }) => void) {
+    this.onFileWritten = cb
   }
 
   async sendMessage(
@@ -67,13 +74,23 @@ export class AgentManager {
       content: m.content
     }))
 
-    // Build tools array if employee can contact others
+    // Build tools array: delegation + builtin tools
     const contactable = this.getContactableEmployees(employee)
-    const tools = contactable.length > 0
-      ? (provider.id === 'anthropic'
-          ? [this.buildDelegateToolAnthropic()]
-          : [this.buildDelegateToolOpenAI()])
-      : undefined
+    const isAnthropic = provider.id === 'anthropic'
+    const toolsList: Record<string, unknown>[] = []
+
+    // Add delegation tool if employee can contact others
+    if (contactable.length > 0) {
+      toolsList.push(isAnthropic ? this.buildDelegateToolAnthropic() : this.buildDelegateToolOpenAI())
+    }
+
+    // Add builtin tools based on employee configuration
+    const builtinTools = isAnthropic
+      ? this.buildBuiltinToolsAnthropic(employee)
+      : this.buildBuiltinToolsOpenAI(employee)
+    toolsList.push(...builtinTools)
+
+    const tools = toolsList.length > 0 ? toolsList : undefined
 
     try {
       const responseText = await this.callProvider(
@@ -82,7 +99,8 @@ export class AgentManager {
         systemPrompt,
         messages,
         onStream,
-        tools
+        tools,
+        conversationId
       )
 
       const msg = this.store.addMessage(conversationId, {
@@ -213,6 +231,290 @@ export class AgentManager {
   }
 
   /**
+   * Build builtin tool definitions for OpenAI-compatible APIs based on employee's enabled tools.
+   */
+  private buildBuiltinToolsOpenAI(employee: Employee): Record<string, unknown>[] {
+    const tools: Record<string, unknown>[] = []
+    const enabledToolIds = new Set(employee.tools.filter(t => t.enabled && t.source === 'builtin').map(t => t.id))
+
+    if (enabledToolIds.has('web-search')) {
+      tools.push({
+        type: 'function',
+        function: {
+          name: 'web_search',
+          description: 'Search the web for information',
+          parameters: {
+            type: 'object',
+            properties: { query: { type: 'string', description: 'The search query' } },
+            required: ['query']
+          }
+        }
+      })
+    }
+    if (enabledToolIds.has('web-browse')) {
+      tools.push({
+        type: 'function',
+        function: {
+          name: 'web_browse',
+          description: 'Visit a URL and read its content',
+          parameters: {
+            type: 'object',
+            properties: { url: { type: 'string', description: 'The URL to visit' } },
+            required: ['url']
+          }
+        }
+      })
+    }
+    if (enabledToolIds.has('file-read')) {
+      tools.push({
+        type: 'function',
+        function: {
+          name: 'read_file',
+          description: 'Read a file from the local filesystem',
+          parameters: {
+            type: 'object',
+            properties: { path: { type: 'string', description: 'Path to the file' } },
+            required: ['path']
+          }
+        }
+      })
+    }
+    if (enabledToolIds.has('file-write')) {
+      tools.push({
+        type: 'function',
+        function: {
+          name: 'write_file',
+          description: 'Write content to a file',
+          parameters: {
+            type: 'object',
+            properties: {
+              path: { type: 'string', description: 'Path to the file' },
+              content: { type: 'string', description: 'Content to write' }
+            },
+            required: ['path', 'content']
+          }
+        }
+      })
+    }
+    if (enabledToolIds.has('code-execute')) {
+      tools.push({
+        type: 'function',
+        function: {
+          name: 'execute_code',
+          description: 'Execute code in a sandboxed environment',
+          parameters: {
+            type: 'object',
+            properties: {
+              language: { type: 'string', description: 'Programming language (e.g. python, javascript)' },
+              code: { type: 'string', description: 'The code to execute' }
+            },
+            required: ['language', 'code']
+          }
+        }
+      })
+    }
+    return tools
+  }
+
+  /**
+   * Build builtin tool definitions for Anthropic API based on employee's enabled tools.
+   */
+  private buildBuiltinToolsAnthropic(employee: Employee): Record<string, unknown>[] {
+    const tools: Record<string, unknown>[] = []
+    const enabledToolIds = new Set(employee.tools.filter(t => t.enabled && t.source === 'builtin').map(t => t.id))
+
+    if (enabledToolIds.has('web-search')) {
+      tools.push({
+        name: 'web_search',
+        description: 'Search the web for information',
+        input_schema: {
+          type: 'object',
+          properties: { query: { type: 'string', description: 'The search query' } },
+          required: ['query']
+        }
+      })
+    }
+    if (enabledToolIds.has('web-browse')) {
+      tools.push({
+        name: 'web_browse',
+        description: 'Visit a URL and read its content',
+        input_schema: {
+          type: 'object',
+          properties: { url: { type: 'string', description: 'The URL to visit' } },
+          required: ['url']
+        }
+      })
+    }
+    if (enabledToolIds.has('file-read')) {
+      tools.push({
+        name: 'read_file',
+        description: 'Read a file from the local filesystem',
+        input_schema: {
+          type: 'object',
+          properties: { path: { type: 'string', description: 'Path to the file' } },
+          required: ['path']
+        }
+      })
+    }
+    if (enabledToolIds.has('file-write')) {
+      tools.push({
+        name: 'write_file',
+        description: 'Write content to a file',
+        input_schema: {
+          type: 'object',
+          properties: {
+            path: { type: 'string', description: 'Path to the file' },
+            content: { type: 'string', description: 'Content to write' }
+          },
+          required: ['path', 'content']
+        }
+      })
+    }
+    if (enabledToolIds.has('code-execute')) {
+      tools.push({
+        name: 'execute_code',
+        description: 'Execute code in a sandboxed environment',
+        input_schema: {
+          type: 'object',
+          properties: {
+            language: { type: 'string', description: 'Programming language (e.g. python, javascript)' },
+            code: { type: 'string', description: 'The code to execute' }
+          },
+          required: ['language', 'code']
+        }
+      })
+    }
+    return tools
+  }
+
+  /**
+   * Execute a builtin tool and return the result string.
+   */
+  private async executeBuiltinTool(
+    toolName: string,
+    args: Record<string, string>,
+    conversationId?: string
+  ): Promise<string> {
+    switch (toolName) {
+      case 'web_search': {
+        try {
+          const query = args.query || ''
+          const response = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Prometheus/1.0)' }
+          })
+          const html = await response.text()
+          // Strip HTML tags and get text content
+          const text = html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
+          return text.slice(0, 5000) || `Web search executed for: ${query}`
+        } catch {
+          return `Web search executed for: ${args.query}. (Could not fetch results — check network connection.)`
+        }
+      }
+      case 'web_browse': {
+        try {
+          const url = args.url || ''
+          const response = await fetch(url, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Prometheus/1.0)' }
+          })
+          const html = await response.text()
+          const text = html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
+          return text.slice(0, 5000)
+        } catch (err) {
+          return `Failed to browse ${args.url}: ${err instanceof Error ? err.message : 'Unknown error'}`
+        }
+      }
+      case 'read_file': {
+        try {
+          const content = readFileSync(args.path, 'utf-8')
+          return content.slice(0, 10000)
+        } catch (err) {
+          return `Failed to read file ${args.path}: ${err instanceof Error ? err.message : 'Unknown error'}`
+        }
+      }
+      case 'write_file': {
+        try {
+          writeFileSync(args.path, args.content)
+          // Notify frontend about the written file
+          if (conversationId) {
+            this.onFileWritten?.({ conversationId, path: args.path, content: args.content })
+          }
+          return `File written successfully to ${args.path} (${args.content.length} bytes)`
+        } catch (err) {
+          return `Failed to write file ${args.path}: ${err instanceof Error ? err.message : 'Unknown error'}`
+        }
+      }
+      case 'execute_code': {
+        return `Code execution is not yet available in sandbox. Language: ${args.language}, Code length: ${args.code?.length || 0} chars.`
+      }
+      default:
+        return `Unknown tool: ${toolName}`
+    }
+  }
+
+  /**
+   * Estimate token count for a piece of text using a simple heuristic.
+   */
+  countTokens(text: string): number {
+    return Math.ceil(text.length / 4)
+  }
+
+  /**
+   * Count total tokens in a conversation.
+   */
+  countConversationTokens(conversationId: string): number {
+    const conv = this.store.getConversation(conversationId)
+    if (!conv) return 0
+    const allText = conv.messages.map(m => m.content).join('')
+    return this.countTokens(allText)
+  }
+
+  /**
+   * Compress a conversation by summarizing older messages.
+   */
+  async compressConversation(conversationId: string): Promise<void> {
+    const conv = this.store.getConversation(conversationId)
+    if (!conv || conv.messages.length <= 4) return
+
+    const employee = this.store.getEmployee(conv.employeeId)
+    if (!employee) return
+
+    const settings = this.store.getSettings()
+    const provider = settings.providers.find(p => p.id === employee.provider)
+    if (!provider?.apiKey && provider?.id !== 'ollama') return
+    if (!provider) return
+
+    // Split messages: older ones to summarize, keep last 4
+    const toSummarize = conv.messages.slice(0, conv.messages.length - 4)
+    const toKeep = conv.messages.slice(conv.messages.length - 4)
+
+    // Build summary prompt
+    const summaryContent = toSummarize.map(m => `${m.role}: ${m.content}`).join('\n\n')
+    const summaryMessages = [
+      { role: 'user', content: `Summarize this conversation concisely, preserving key facts, decisions, and context:\n\n${summaryContent}` }
+    ]
+
+    // Call the LLM to get a summary
+    const summaryText = await this.callProvider(
+      provider,
+      employee,
+      'You are a helpful assistant that creates concise conversation summaries.',
+      summaryMessages,
+      () => {},
+      undefined
+    )
+
+    // Replace old messages with summary + keep recent ones
+    const summaryMsg: ChatMessage = {
+      id: `summary-${Date.now()}`,
+      role: 'system',
+      content: `[Conversation Summary]\n${summaryText}`,
+      timestamp: new Date().toISOString()
+    }
+
+    this.store.replaceMessages(conversationId, [summaryMsg, ...toKeep])
+  }
+
+  /**
    * Auto-execute a task: send the Agent Brief to the target employee and capture their response.
    */
   private async executeTask(task: Task): Promise<void> {
@@ -306,12 +608,13 @@ export class AgentManager {
     systemPrompt: string,
     messages: { role: string; content: string }[],
     onStream: (chunk: string) => void,
-    tools?: Record<string, unknown>[]
+    tools?: Record<string, unknown>[],
+    conversationId?: string
   ): Promise<string> {
     const model = employee.model
     switch (provider.id) {
       case 'anthropic':
-        return this.callAnthropic(provider, employee, systemPrompt, messages, onStream, tools)
+        return this.callAnthropic(provider, employee, systemPrompt, messages, onStream, tools, conversationId)
       case 'ollama':
         return this.callOllama(provider, model, systemPrompt, messages, onStream)
       case 'ollama-cloud':
@@ -321,7 +624,7 @@ export class AgentManager {
       case 'google':
       case 'mistral':
       default:
-        return this.callOpenAICompatible(provider, employee, systemPrompt, messages, onStream, tools)
+        return this.callOpenAICompatible(provider, employee, systemPrompt, messages, onStream, tools, conversationId)
     }
   }
 
@@ -356,7 +659,8 @@ export class AgentManager {
     systemPrompt: string,
     messages: { role: string; content: string }[],
     onStream: (chunk: string) => void,
-    tools?: Record<string, unknown>[]
+    tools?: Record<string, unknown>[],
+    conversationId?: string
   ): Promise<string> {
     const baseUrl = this.getBaseUrl(provider)
     const url = `${baseUrl}/chat/completions`
@@ -416,7 +720,7 @@ export class AgentManager {
     // Check if the non-streaming fallback captured a tool call
     // For tool calls, we need to do a non-streaming request
     if (tools && tools.length > 0 && !result) {
-      return this.callOpenAIWithToolHandling(provider, employee, systemPrompt, apiMessages, tools, onStream)
+      return this.callOpenAIWithToolHandling(provider, employee, systemPrompt, apiMessages, tools, onStream, conversationId)
     }
 
     return result
@@ -424,6 +728,7 @@ export class AgentManager {
 
   /**
    * Non-streaming OpenAI call that handles tool use responses.
+   * Supports both delegate_task and builtin tools with follow-up requests.
    */
   private async callOpenAIWithToolHandling(
     provider: ProviderConfig,
@@ -431,17 +736,11 @@ export class AgentManager {
     systemPrompt: string,
     apiMessages: Record<string, unknown>[],
     tools: Record<string, unknown>[],
-    onStream: (chunk: string) => void
+    onStream: (chunk: string) => void,
+    conversationId?: string
   ): Promise<string> {
     const baseUrl = this.getBaseUrl(provider)
     const url = `${baseUrl}/chat/completions`
-
-    const body: Record<string, unknown> = {
-      model: employee.model,
-      messages: apiMessages,
-      stream: false,
-      tools
-    }
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -453,39 +752,74 @@ export class AgentManager {
       headers['x-goog-api-key'] = provider.apiKey
     }
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body)
-    })
+    // Loop to handle multiple tool call rounds
+    let currentMessages = [...apiMessages]
+    let maxRounds = 5
 
-    if (!response.ok) {
-      const errorBody = await response.text()
-      throw new Error(`${provider.name} API error ${response.status}: ${errorBody}`)
-    }
-
-    const json = await response.json() as Record<string, unknown>
-    const choice = (json.choices as Record<string, unknown>[])?.[0]
-    const message = choice?.message as Record<string, unknown> | undefined
-    const toolCalls = message?.tool_calls as Record<string, unknown>[] | undefined
-
-    if (toolCalls && toolCalls.length > 0) {
-      const toolCall = toolCalls[0]
-      const fn = toolCall.function as { name: string; arguments: string }
-
-      if (fn.name === 'delegate_task') {
-        const args = JSON.parse(fn.arguments) as Record<string, string>
-        const { message: delegateMsg } = this.handleDelegateTask(employee, args)
-        const fullResponse = ((message?.content as string) || '') + '\n\n' + delegateMsg
-        onStream(fullResponse)
-        return fullResponse
+    while (maxRounds-- > 0) {
+      const body: Record<string, unknown> = {
+        model: employee.model,
+        messages: currentMessages,
+        stream: false,
+        tools
       }
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body)
+      })
+
+      if (!response.ok) {
+        const errorBody = await response.text()
+        throw new Error(`${provider.name} API error ${response.status}: ${errorBody}`)
+      }
+
+      const json = await response.json() as Record<string, unknown>
+      const choice = (json.choices as Record<string, unknown>[])?.[0]
+      const message = choice?.message as Record<string, unknown> | undefined
+      const toolCalls = message?.tool_calls as Record<string, unknown>[] | undefined
+      const finishReason = choice?.finish_reason as string
+
+      if (toolCalls && toolCalls.length > 0) {
+        // Add assistant message with tool calls to history
+        currentMessages.push(message as Record<string, unknown>)
+
+        // Process each tool call
+        for (const toolCall of toolCalls) {
+          const fn = toolCall.function as { name: string; arguments: string }
+          const args = JSON.parse(fn.arguments) as Record<string, string>
+          let toolResult: string
+
+          if (fn.name === 'delegate_task') {
+            const { message: delegateMsg } = this.handleDelegateTask(employee, args)
+            toolResult = delegateMsg
+          } else {
+            toolResult = await this.executeBuiltinTool(fn.name, args, conversationId)
+          }
+
+          // Add tool result to messages
+          currentMessages.push({
+            role: 'tool',
+            tool_call_id: (toolCall as Record<string, unknown>).id,
+            content: toolResult
+          })
+        }
+
+        // Continue loop to get the next response
+        continue
+      }
+
+      // No tool calls — return text response
+      const text = (message?.content as string) || ''
+      onStream(text)
+      return text
     }
 
-    // Regular text response
-    const text = (message?.content as string) || ''
-    onStream(text)
-    return text
+    // Safety fallback if max rounds exceeded
+    const fallback = 'Reached maximum tool call rounds.'
+    onStream(fallback)
+    return fallback
   }
 
   /**
@@ -498,7 +832,8 @@ export class AgentManager {
     systemPrompt: string,
     messages: { role: string; content: string }[],
     onStream: (chunk: string) => void,
-    tools?: Record<string, unknown>[]
+    tools?: Record<string, unknown>[],
+    conversationId?: string
   ): Promise<string> {
     const baseUrl = provider.baseUrl || 'https://api.anthropic.com'
     const url = `${baseUrl}/v1/messages`
@@ -546,7 +881,7 @@ export class AgentManager {
 
     // If streaming didn't capture tool use, try non-streaming for tool handling
     if (tools && tools.length > 0 && !result) {
-      return this.callAnthropicWithToolHandling(provider, employee, systemPrompt, apiMessages, tools, onStream)
+      return this.callAnthropicWithToolHandling(provider, employee, systemPrompt, apiMessages, tools, onStream, conversationId)
     }
 
     return result
@@ -554,6 +889,7 @@ export class AgentManager {
 
   /**
    * Non-streaming Anthropic call that handles tool use responses.
+   * Supports both delegate_task and builtin tools with follow-up requests.
    */
   private async callAnthropicWithToolHandling(
     provider: ProviderConfig,
@@ -561,7 +897,8 @@ export class AgentManager {
     systemPrompt: string,
     apiMessages: { role: string; content: string }[],
     tools: Record<string, unknown>[],
-    onStream: (chunk: string) => void
+    onStream: (chunk: string) => void,
+    conversationId?: string
   ): Promise<string> {
     const baseUrl = provider.baseUrl || 'https://api.anthropic.com'
     const url = `${baseUrl}/v1/messages`
@@ -570,46 +907,86 @@ export class AgentManager {
       ? [{ type: 'text' as const, text: systemPrompt, cache_control: { type: 'ephemeral' as const } }]
       : undefined
 
-    const body: Record<string, unknown> = {
-      model: employee.model,
-      max_tokens: 8192,
-      stream: false,
-      system,
-      messages: apiMessages,
-      tools
+    const requestHeaders = {
+      'Content-Type': 'application/json',
+      'x-api-key': provider.apiKey,
+      'anthropic-version': '2023-06-01'
     }
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': provider.apiKey,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify(body)
-    })
+    // Messages can have mixed content types for Anthropic tool flow
+    let currentMessages: Record<string, unknown>[] = apiMessages.map(m => ({ role: m.role, content: m.content }))
+    let maxRounds = 5
+    let accumulatedText = ''
 
-    if (!response.ok) {
-      const errorBody = await response.text()
-      throw new Error(`Anthropic API error ${response.status}: ${errorBody}`)
-    }
-
-    const json = await response.json() as Record<string, unknown>
-    const content = json.content as { type: string; text?: string; name?: string; input?: Record<string, string> }[]
-
-    let textParts = ''
-    for (const block of content) {
-      if (block.type === 'text' && block.text) {
-        textParts += block.text
+    while (maxRounds-- > 0) {
+      const body: Record<string, unknown> = {
+        model: employee.model,
+        max_tokens: 8192,
+        stream: false,
+        system,
+        messages: currentMessages,
+        tools
       }
-      if (block.type === 'tool_use' && block.name === 'delegate_task' && block.input) {
-        const { message: delegateMsg } = this.handleDelegateTask(employee, block.input)
-        textParts += '\n\n' + delegateMsg
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: requestHeaders,
+        body: JSON.stringify(body)
+      })
+
+      if (!response.ok) {
+        const errorBody = await response.text()
+        throw new Error(`Anthropic API error ${response.status}: ${errorBody}`)
       }
+
+      const json = await response.json() as Record<string, unknown>
+      const content = json.content as { type: string; id?: string; text?: string; name?: string; input?: Record<string, string> }[]
+      const stopReason = json.stop_reason as string
+
+      // Collect text and tool use blocks
+      const toolUseBlocks: { id: string; name: string; input: Record<string, string> }[] = []
+      for (const block of content) {
+        if (block.type === 'text' && block.text) {
+          accumulatedText += block.text
+        }
+        if (block.type === 'tool_use' && block.name && block.id) {
+          toolUseBlocks.push({ id: block.id, name: block.name, input: block.input || {} })
+        }
+      }
+
+      // If no tool use, we're done
+      if (stopReason !== 'tool_use' || toolUseBlocks.length === 0) {
+        break
+      }
+
+      // Add assistant response with tool_use to messages
+      currentMessages.push({ role: 'assistant', content })
+
+      // Process tool calls and build tool_result
+      const toolResults: Record<string, unknown>[] = []
+      for (const toolUse of toolUseBlocks) {
+        let toolResult: string
+
+        if (toolUse.name === 'delegate_task') {
+          const { message: delegateMsg } = this.handleDelegateTask(employee, toolUse.input)
+          toolResult = delegateMsg
+        } else {
+          toolResult = await this.executeBuiltinTool(toolUse.name, toolUse.input, conversationId)
+        }
+
+        toolResults.push({
+          type: 'tool_result',
+          tool_use_id: toolUse.id,
+          content: toolResult
+        })
+      }
+
+      // Add user message with tool results
+      currentMessages.push({ role: 'user', content: toolResults })
     }
 
-    onStream(textParts)
-    return textParts
+    onStream(accumulatedText)
+    return accumulatedText
   }
 
   /**

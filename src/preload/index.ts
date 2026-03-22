@@ -52,6 +52,10 @@ const api = {
   chat: {
     send: (conversationId: string, message: string) =>
       ipcRenderer.invoke('chat:send', conversationId, message),
+    countTokens: (conversationId: string) =>
+      ipcRenderer.invoke('chat:countTokens', conversationId),
+    compress: (conversationId: string) =>
+      ipcRenderer.invoke('chat:compress', conversationId),
     onStream: (callback: (data: { conversationId: string; chunk: string }) => void) => {
       const handler = (_event: unknown, data: { conversationId: string; chunk: string }) => callback(data)
       ipcRenderer.on('chat:stream', handler)
@@ -61,6 +65,23 @@ const api = {
       const handler = (_event: unknown, data: { conversationId: string; message: unknown }) => callback(data)
       ipcRenderer.on('chat:messageStored', handler)
       return () => ipcRenderer.removeListener('chat:messageStored', handler)
+    },
+    onFileWritten: (callback: (data: { conversationId: string; path: string; content: string }) => void) => {
+      const handler = (_event: unknown, data: { conversationId: string; path: string; content: string }) => callback(data)
+      ipcRenderer.on('chat:fileWritten', handler)
+      return () => ipcRenderer.removeListener('chat:fileWritten', handler)
+    }
+  },
+  recurringTasks: {
+    list: () => ipcRenderer.invoke('recurringTasks:list'),
+    get: (id: string) => ipcRenderer.invoke('recurringTasks:get', id),
+    create: (data: unknown) => ipcRenderer.invoke('recurringTasks:create', data),
+    update: (id: string, data: unknown) => ipcRenderer.invoke('recurringTasks:update', id, data),
+    delete: (id: string) => ipcRenderer.invoke('recurringTasks:delete', id),
+    onExecuted: (callback: (task: unknown) => void) => {
+      const handler = (_event: unknown, task: unknown) => callback(task)
+      ipcRenderer.on('recurringTask:executed', handler)
+      return () => ipcRenderer.removeListener('recurringTask:executed', handler)
     }
   },
   settings: {

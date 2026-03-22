@@ -9,7 +9,7 @@ import { SettingsPage } from '@/components/settings/settings-page'
 import { useAppStore, type ChatMessage } from '@/stores/app-store'
 
 export default function App() {
-  const { activeView, loadCompanies, loadEmployees, loadTerminatedEmployees, loadDepartments, loadKnowledge, loadTasks, loadSettings } = useAppStore()
+  const { activeView, loadCompanies, loadEmployees, loadTerminatedEmployees, loadDepartments, loadKnowledge, loadTasks, loadRecurringTasks, loadSettings } = useAppStore()
 
   // Load companies first, then scoped data
   useEffect(() => {
@@ -21,11 +21,12 @@ export default function App() {
         loadDepartments(),
         loadKnowledge(),
         loadTasks(),
+        loadRecurringTasks(),
         loadSettings()
       ])
     }
     init()
-  }, [loadCompanies, loadEmployees, loadTerminatedEmployees, loadDepartments, loadKnowledge, loadTasks, loadSettings])
+  }, [loadCompanies, loadEmployees, loadTerminatedEmployees, loadDepartments, loadKnowledge, loadTasks, loadRecurringTasks, loadSettings])
 
   // Set up streaming listener
   useEffect(() => {
@@ -56,6 +57,16 @@ export default function App() {
   useEffect(() => {
     if (!window.api?.tasks?.onUpdate) return
     const unsub = window.api.tasks.onUpdate(() => {
+      useAppStore.getState().loadTasks()
+    })
+    return unsub
+  }, [])
+
+  // Set up recurring task executed listener
+  useEffect(() => {
+    if (!window.api?.recurringTasks?.onExecuted) return
+    const unsub = window.api.recurringTasks.onExecuted(() => {
+      useAppStore.getState().loadRecurringTasks()
       useAppStore.getState().loadTasks()
     })
     return unsub

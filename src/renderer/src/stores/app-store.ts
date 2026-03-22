@@ -110,6 +110,20 @@ interface ProviderConfig {
   enabled: boolean
 }
 
+interface RecurringTask {
+  id: string
+  employeeId: string
+  name: string
+  brief: string
+  schedule: 'hourly' | 'daily' | 'weekly'
+  scheduleTime?: string
+  enabled: boolean
+  lastRunAt: string | null
+  nextRunAt: string
+  createdAt: string
+  updatedAt: string
+}
+
 interface AppSettings {
   providers: ProviderConfig[]
   defaultProvider: string
@@ -132,6 +146,7 @@ interface AppState {
 
   // Task data
   tasks: Task[]
+  recurringTasks: RecurringTask[]
 
   // UI State
   activeView: 'dashboard' | 'employees' | 'chat' | 'knowledge' | 'tasks' | 'settings'
@@ -194,6 +209,16 @@ interface AppState {
   updateTask: (id: string, data: Partial<Task>) => Promise<void>
   deleteTask: (id: string) => Promise<void>
 
+  // Actions — Recurring Tasks
+  loadRecurringTasks: () => Promise<void>
+  createRecurringTask: (data: Omit<RecurringTask, 'id' | 'createdAt' | 'updatedAt'>) => Promise<RecurringTask>
+  updateRecurringTask: (id: string, data: Partial<RecurringTask>) => Promise<void>
+  deleteRecurringTask: (id: string) => Promise<void>
+
+  // Actions — Token counting & compression
+  getTokenCount: (conversationId: string) => Promise<number>
+  compressConversation: (conversationId: string) => Promise<void>
+
   // Actions — Settings
   loadSettings: () => Promise<void>
   updateSettings: (settings: Partial<AppSettings>) => Promise<void>
@@ -208,6 +233,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   knowledge: [],
   conversations: [],
   tasks: [],
+  recurringTasks: [],
   settings: null,
   activeView: 'dashboard',
   selectedEmployeeId: null,
@@ -273,7 +299,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       get().loadTerminatedEmployees(),
       get().loadDepartments(),
       get().loadKnowledge(),
-      get().loadTasks()
+      get().loadTasks(),
+      get().loadRecurringTasks()
     ])
   },
 
@@ -429,6 +456,52 @@ export const useAppStore = create<AppState>((set, get) => ({
     await get().loadTasks()
   },
 
+  // Recurring Tasks
+  loadRecurringTasks: async () => {
+    const recurringTasks = await window.api.recurringTasks.list()
+    set({ recurringTasks })
+  },
+
+  createRecurringTask: async (data) => {
+    const task = await window.api.recurringTasks.create(data)
+    await get().loadRecurringTasks()
+    return task
+  },
+
+  updateRecurringTask: async (id, data) => {
+    await window.api.recurringTasks.update(id, data)
+    await get().loadRecurringTasks()
+  },
+
+  deleteRecurringTask: async (id) => {
+    await window.api.recurringTasks.delete(id)
+    await get().loadRecurringTasks()
+  },
+
+  // Token counting & compression
+  getTokenCount: async (conversationId) => {
+    if (!window.api?.chat?.countTokens) {
+      // Fallback: estimate locally
+      const conv = get().conversations.find(c => c.id === conversationId)
+      if (!conv) return 0
+      const text = conv.messages.map(m => m.content).join('')
+      return Math.ceil(text.length / 4)
+    }
+    return window.api.chat.countTokens(conversationId)
+  },
+
+  compressConversation: async (conversationId) => {
+    if (!window.api?.chat?.compress) return
+    const conv = await window.api.chat.compress(conversationId)
+    if (conv) {
+      set((state) => ({
+        conversations: state.conversations.map(c =>
+          c.id === conversationId ? conv : c
+        )
+      }))
+    }
+  },
+
   // Settings
   loadSettings: async () => {
     const settings = await window.api.settings.get()
@@ -441,4 +514,4 @@ export const useAppStore = create<AppState>((set, get) => ({
   }
 }))
 
-export type { Company, Department, ContactAccess, Employee, KnowledgeDocument, Conversation, ChatMessage, Task, AppSettings, ProviderConfig, ToolAssignment, PermissionSet }
+export type { Company, Department, ContactAccess, Employee, KnowledgeDocument, Conversation, ChatMessage, Task, RecurringTask, AppSettings, ProviderConfig, ToolAssignment, PermissionSet }

@@ -2,10 +2,12 @@ import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import { join } from 'path'
 import { EmployeeStore } from './store'
 import { AgentManager } from './agent-manager'
+import { Scheduler } from './scheduler'
 
 let mainWindow: BrowserWindow | null = null
 let store: EmployeeStore
 let agentManager: AgentManager
+let scheduler: Scheduler
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -97,6 +99,23 @@ function registerIpcHandlers(): void {
     )
   })
 
+  // Chat: token counting and compression
+  ipcMain.handle('chat:countTokens', (_event, conversationId: string) => {
+    return agentManager.countConversationTokens(conversationId)
+  })
+
+  ipcMain.handle('chat:compress', async (_event, conversationId: string) => {
+    await agentManager.compressConversation(conversationId)
+    return store.getConversation(conversationId)
+  })
+
+  // Recurring Tasks IPC Handlers
+  ipcMain.handle('recurringTasks:list', () => store.listRecurringTasks())
+  ipcMain.handle('recurringTasks:get', (_event, id: string) => store.getRecurringTask(id))
+  ipcMain.handle('recurringTasks:create', (_event, data) => store.createRecurringTask(data))
+  ipcMain.handle('recurringTasks:update', (_event, id: string, data) => store.updateRecurringTask(id, data))
+  ipcMain.handle('recurringTasks:delete', (_event, id: string) => store.deleteRecurringTask(id))
+
   // Settings IPC Handlers
   ipcMain.handle('settings:get', () => store.getSettings())
   ipcMain.handle('settings:update', (_event, settings) => store.updateSettings(settings))
@@ -111,6 +130,18 @@ app.whenReady().then(() => {
   agentManager.setTaskUpdateCallback((task) => {
     mainWindow?.webContents.send('task:updated', task)
   })
+
+  // Push file-written events to frontend
+  agentManager.setFileWrittenCallback((data) => {
+    mainWindow?.webContents.send('chat:fileWritten', data)
+  })
+
+  // Initialize and start the scheduler
+  scheduler = new Scheduler(store, agentManager)
+  scheduler.setTaskRunCallback((recurringTask) => {
+    mainWindow?.webContents.send('recurringTask:executed', recurringTask)
+  })
+  scheduler.start()
 
   registerIpcHandlers()
   createWindow()

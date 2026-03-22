@@ -99,6 +99,20 @@ export interface Task {
   updatedAt: string
 }
 
+export interface RecurringTask {
+  id: string
+  employeeId: string
+  name: string
+  brief: string
+  schedule: 'hourly' | 'daily' | 'weekly'
+  scheduleTime?: string
+  enabled: boolean
+  lastRunAt: string | null
+  nextRunAt: string
+  createdAt: string
+  updatedAt: string
+}
+
 export interface AppSettings {
   providers: ProviderConfig[]
   defaultProvider: string

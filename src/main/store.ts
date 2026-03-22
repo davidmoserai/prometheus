@@ -10,6 +10,7 @@ import {
   Conversation,
   ChatMessage,
   Task,
+  RecurringTask,
   AppSettings,
   DEFAULT_SETTINGS,
   DEFAULT_PROVIDERS
@@ -21,6 +22,7 @@ interface CompanyData {
   conversations: Conversation[]
   departments: Department[]
   tasks: Task[]
+  recurringTasks: RecurringTask[]
 }
 
 interface StoreData {
@@ -54,7 +56,7 @@ interface LegacyStoreData {
 }
 
 function emptyCompanyData(): CompanyData {
-  return { employees: [], knowledge: [], conversations: [], departments: [], tasks: [] }
+  return { employees: [], knowledge: [], conversations: [], departments: [], tasks: [], recurringTasks: [] }
 }
 
 export class EmployeeStore {
@@ -159,7 +161,8 @@ export class EmployeeStore {
           knowledge: legacy.knowledge || [],
           conversations: legacy.conversations || [],
           departments: [],
-          tasks: []
+          tasks: [],
+          recurringTasks: []
         }
       },
       settings: legacy.settings || DEFAULT_SETTINGS
@@ -455,6 +458,14 @@ export class EmployeeStore {
     return msg
   }
 
+  replaceMessages(conversationId: string, messages: ChatMessage[]): void {
+    const conv = this.getActiveData().conversations.find(c => c.id === conversationId)
+    if (!conv) return
+    conv.messages = messages
+    conv.updatedAt = new Date().toISOString()
+    this.save()
+  }
+
   // Settings (global, not per-company)
   // Models always come from code (DEFAULT_PROVIDERS), user data (apiKey, enabled, baseUrl) from store
   getSettings(): AppSettings {
@@ -527,6 +538,55 @@ export class EmployeeStore {
     const len = active.tasks.length
     active.tasks = active.tasks.filter(t => t.id !== id)
     if (active.tasks.length < len) {
+      this.save()
+      return true
+    }
+    return false
+  }
+
+  // Recurring Tasks (scoped to active company)
+  listRecurringTasks(): RecurringTask[] {
+    return this.getActiveData().recurringTasks || []
+  }
+
+  getRecurringTask(id: string): RecurringTask | undefined {
+    return (this.getActiveData().recurringTasks || []).find(t => t.id === id)
+  }
+
+  createRecurringTask(data: Omit<RecurringTask, 'id' | 'createdAt' | 'updatedAt'>): RecurringTask {
+    const active = this.getActiveData()
+    if (!active.recurringTasks) active.recurringTasks = []
+    const task: RecurringTask = {
+      ...data,
+      id: uuid(),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    }
+    active.recurringTasks.push(task)
+    this.save()
+    return task
+  }
+
+  updateRecurringTask(id: string, data: Partial<RecurringTask>): RecurringTask | undefined {
+    const tasks = this.getActiveData().recurringTasks || []
+    const idx = tasks.findIndex(t => t.id === id)
+    if (idx === -1) return undefined
+    tasks[idx] = {
+      ...tasks[idx],
+      ...data,
+      id,
+      updatedAt: new Date().toISOString()
+    }
+    this.save()
+    return tasks[idx]
+  }
+
+  deleteRecurringTask(id: string): boolean {
+    const active = this.getActiveData()
+    if (!active.recurringTasks) return false
+    const len = active.recurringTasks.length
+    active.recurringTasks = active.recurringTasks.filter(t => t.id !== id)
+    if (active.recurringTasks.length < len) {
       this.save()
       return true
     }

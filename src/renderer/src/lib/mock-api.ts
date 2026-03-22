@@ -83,12 +83,27 @@ interface Task {
   updatedAt: string
 }
 
+interface RecurringTask {
+  id: string
+  employeeId: string
+  name: string
+  brief: string
+  schedule: 'hourly' | 'daily' | 'weekly'
+  scheduleTime?: string
+  enabled: boolean
+  lastRunAt: string | null
+  nextRunAt: string
+  createdAt: string
+  updatedAt: string
+}
+
 interface CompanyData {
   employees: Employee[]
   knowledge: KnowledgeDocument[]
   conversations: Conversation[]
   departments: Department[]
   tasks: Task[]
+  recurringTasks: RecurringTask[]
 }
 
 const now = () => new Date().toISOString()
@@ -196,13 +211,14 @@ let companyData: Record<string, CompanyData> = {
       }
     ],
     conversations: [],
-    tasks: []
+    tasks: [],
+    recurringTasks: []
   }
 }
 
 function getActive(): CompanyData {
   if (!companyData[activeCompanyId]) {
-    companyData[activeCompanyId] = { employees: [], knowledge: [], conversations: [], departments: [], tasks: [] }
+    companyData[activeCompanyId] = { employees: [], knowledge: [], conversations: [], departments: [], tasks: [], recurringTasks: [] }
   }
   return companyData[activeCompanyId]
 }
@@ -241,7 +257,7 @@ export function installMockApi() {
       create: async (data: { name: string; avatar: string }) => {
         const company: Company = { ...data, id: uuid(), createdAt: now(), updatedAt: now() }
         companies.push(company)
-        companyData[company.id] = { employees: [], knowledge: [], conversations: [], departments: [], tasks: [] }
+        companyData[company.id] = { employees: [], knowledge: [], conversations: [], departments: [], tasks: [], recurringTasks: [] }
         return company
       },
       update: async (id: string, data: Partial<Company>) => {
@@ -376,7 +392,47 @@ export function installMockApi() {
         conv.updatedAt = now()
         return conv.messages[conv.messages.length - 1]
       },
-      onStream: () => () => {}
+      countTokens: async (conversationId: string) => {
+        const conv = getActive().conversations.find(c => c.id === conversationId)
+        if (!conv) return 0
+        const text = conv.messages.map(m => m.content).join('')
+        return Math.ceil(text.length / 4)
+      },
+      compress: async (conversationId: string) => {
+        const conv = getActive().conversations.find(c => c.id === conversationId)
+        if (!conv || conv.messages.length <= 4) return conv
+        const toKeep = conv.messages.slice(conv.messages.length - 4)
+        const summaryMsg = { id: uuid(), role: 'system', content: '[Conversation Summary]\nPrevious messages were summarized.', timestamp: now() }
+        conv.messages = [summaryMsg, ...toKeep]
+        conv.updatedAt = now()
+        return conv
+      },
+      onStream: () => () => {},
+      onFileWritten: () => () => {}
+    },
+    recurringTasks: {
+      list: async () => getActive().recurringTasks || [],
+      get: async (id: string) => (getActive().recurringTasks || []).find(t => t.id === id),
+      create: async (data: Omit<RecurringTask, 'id' | 'createdAt' | 'updatedAt'>) => {
+        const active = getActive()
+        if (!active.recurringTasks) active.recurringTasks = []
+        const task = { ...data, id: uuid(), createdAt: now(), updatedAt: now() } as RecurringTask
+        active.recurringTasks.push(task)
+        return task
+      },
+      update: async (id: string, data: Partial<RecurringTask>) => {
+        const active = getActive()
+        if (!active.recurringTasks) active.recurringTasks = []
+        active.recurringTasks = active.recurringTasks.map(t => t.id === id ? { ...t, ...data, updatedAt: now() } : t)
+        return active.recurringTasks.find(t => t.id === id)
+      },
+      delete: async (id: string) => {
+        const active = getActive()
+        if (!active.recurringTasks) return true
+        active.recurringTasks = active.recurringTasks.filter(t => t.id !== id)
+        return true
+      },
+      onExecuted: () => () => {}
     },
     settings: {
       get: async () => settings,

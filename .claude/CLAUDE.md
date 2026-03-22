@@ -40,11 +40,32 @@ Tailwind spacing utilities (`p-7`, `mb-5`, `gap-6`, etc.) do NOT render at corre
 - Supports both OpenAI-compatible (function calling) and Anthropic (tool_use) formats
 - Tasks page at `components/tasks/tasks-page.tsx` — grouped by status (escalated/pending/in_progress/completed)
 
+## Builtin Tool Execution (Function Calling)
+- Employee tools (`web-search`, `web-browse`, `file-read`, `file-write`, `code-execute`) are wired as real LLM function calling tools
+- Tools are built for both OpenAI (`buildBuiltinToolsOpenAI`) and Anthropic (`buildBuiltinToolsAnthropic`) formats
+- `executeBuiltinTool()` in agent-manager handles execution (web fetch, filesystem read/write, etc.)
+- Tool call flow supports multi-round tool use (up to 5 rounds)
+- `write_file` emits `chat:fileWritten` event to show download cards in chat UI
+
+## Token Counting + Conversation Compression
+- `countTokens()` uses `Math.ceil(text.length / 4)` heuristic
+- `compressConversation()` summarizes older messages via LLM, keeps last 4 messages
+- Chat header shows token count and "Compress" button when > 4000 tokens
+- IPC channels: `chat:countTokens`, `chat:compress`
+
+## Recurring Tasks (Scheduler)
+- `src/main/scheduler.ts` — Scheduler class checks every 60 seconds for due recurring tasks
+- RecurringTask type: `schedule` (hourly/daily/weekly), `scheduleTime`, `enabled`, `nextRunAt`
+- CRUD via `recurringTasks:*` IPC channels, stored in `CompanyData.recurringTasks[]`
+- Tasks page has "Scheduled Tasks" section with create/edit form, enable/disable toggle
+- Scheduler auto-creates conversations and delegates tasks to employees
+
 ## Key Files
 - `src/main/index.ts` — Electron entry, IPC handlers (store/agentManager init in `app.whenReady()`)
 - `src/main/store.ts` — EmployeeStore class, JSON persistence, company-scoped data
 - `src/main/types.ts` — All type definitions (Company, Employee, Task, etc.) + DEFAULT_PROVIDERS
-- `src/main/agent-manager.ts` — Real LLM agent manager (OpenAI-compatible, Anthropic Messages API, Ollama formats; streaming SSE; prompt caching; delegate_task tool)
+- `src/main/agent-manager.ts` — LLM agent manager (OpenAI-compatible, Anthropic, Ollama; streaming; prompt caching; delegate_task + builtin tools; token counting; compression)
+- `src/main/scheduler.ts` — Recurring task scheduler (60s interval check)
 - `src/preload/index.ts` — Secure IPC bridge
 - `src/renderer/src/lib/mock-api.ts` — Mock API for web preview mode
 - `globals.css` — Theme tokens, animations
