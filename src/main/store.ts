@@ -1,6 +1,6 @@
 import { app } from 'electron'
-import { join } from 'path'
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs'
+import { join, basename, extname } from 'path'
+import { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync, statSync, rmSync } from 'fs'
 import { v4 as uuid } from 'uuid'
 import {
   Company,
@@ -9,6 +9,7 @@ import {
   KnowledgeDocument,
   Conversation,
   ChatMessage,
+  ChatAttachment,
   Task,
   RecurringTask,
   AppSettings,
@@ -388,9 +389,7 @@ export class EmployeeStore {
   createKnowledge(data: Omit<KnowledgeDocument, 'id' | 'createdAt' | 'updatedAt'>): KnowledgeDocument {
     const doc: KnowledgeDocument = {
       ...data,
-      lastVerifiedAt: data.lastVerifiedAt ?? null,
       docType: data.docType ?? 'reference',
-      reviewIntervalDays: data.reviewIntervalDays ?? null,
       id: uuid(),
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
@@ -408,19 +407,6 @@ export class EmployeeStore {
       ...docs[idx],
       ...data,
       id,
-      updatedAt: new Date().toISOString()
-    }
-    this.save()
-    return docs[idx]
-  }
-
-  verifyKnowledge(id: string): KnowledgeDocument | undefined {
-    const docs = this.getActiveData().knowledge
-    const idx = docs.findIndex(k => k.id === id)
-    if (idx === -1) return undefined
-    docs[idx] = {
-      ...docs[idx],
-      lastVerifiedAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     }
     this.save()
@@ -466,10 +452,58 @@ export class EmployeeStore {
     const before = data.conversations.length
     data.conversations = data.conversations.filter(c => c.id !== id)
     if (data.conversations.length < before) {
+      // Clean up uploaded files for this conversation
+      const filesDir = this.getConversationFilesDir(id)
+      if (existsSync(filesDir)) {
+        rmSync(filesDir, { recursive: true, force: true })
+      }
       this.save()
       return true
     }
     return false
+  }
+
+  // Find an existing agent-to-agent conversation between two employees
+  findAgentConversation(employeeId1: string, employeeId2: string): Conversation | null {
+    const conversations = this.getActiveData().conversations
+    return conversations.find(c =>
+      (c.employeeId === employeeId1 && c.peerEmployeeId === employeeId2) ||
+      (c.employeeId === employeeId2 && c.peerEmployeeId === employeeId1)
+    ) || null
+  }
+
+  // File upload support
+  getConversationFilesDir(conversationId: string): string {
+    const userDataPath = app.getPath('userData')
+    return join(userDataPath, 'prometheus-data', 'files', conversationId)
+  }
+
+  uploadFile(conversationId: string, sourcePath: string): ChatAttachment {
+    const dir = this.getConversationFilesDir(conversationId)
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+
+    const filename = basename(sourcePath)
+    const ext = extname(filename).toLowerCase()
+    const id = uuid()
+    const destPath = join(dir, `${id}${ext}`)
+
+    copyFileSync(sourcePath, destPath)
+
+    const stats = statSync(destPath)
+    const mimeMap: Record<string, string> = {
+      '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
+      '.gif': 'image/gif', '.webp': 'image/webp', '.pdf': 'application/pdf',
+      '.txt': 'text/plain', '.md': 'text/markdown', '.json': 'application/json',
+      '.csv': 'text/csv'
+    }
+
+    return {
+      id,
+      filename,
+      path: destPath,
+      mimetype: mimeMap[ext] || 'application/octet-stream',
+      size: stats.size
+    }
   }
 
   addMessage(conversationId: string, message: Omit<ChatMessage, 'id' | 'timestamp'>): ChatMessage {

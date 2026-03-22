@@ -106,6 +106,8 @@ function buildMastraTools(
   conversationId: string | undefined,
   contactable: Employee[],
   onDelegateTask: (fromEmployee: Employee, args: Record<string, string>) => { task: Task; message: string },
+  onMessageEmployee?: (fromEmployee: Employee, toEmployeeId: string, message: string) => Promise<string>,
+  onToolCall?: (data: { tool: string; summary: string }) => void,
   onFileWritten?: (data: { conversationId: string; path: string; content: string }) => void
 ): Record<string, ReturnType<typeof createTool>> {
   const tools: Record<string, ReturnType<typeof createTool>> = {}
@@ -129,8 +131,30 @@ function buildMastraTools(
         escalate_if: z.string().describe("Condition requiring founder's input")
       }),
       execute: async (input) => {
+        const toEmp = store.getEmployee(input.to_employee_id)
+        onToolCall?.({ tool: 'delegate_task', summary: `Delegated task to ${toEmp?.name || 'employee'}: ${input.objective}` })
         const { message } = onDelegateTask(employee, input as Record<string, string>)
         return { result: message }
+      }
+    })
+
+    // Message employee tool — for lightweight collaboration
+    tools.message_employee = createTool({
+      id: 'message_employee',
+      description: 'Send a message to another employee and get their response. Use this for quick questions, clarifications, or lightweight collaboration — not for formal task assignments.',
+      inputSchema: z.object({
+        to_employee_id: z.string().describe('ID of the employee to message'),
+        message: z.string().describe('Your message to them')
+      }),
+      execute: async (input) => {
+        const toEmp = store.getEmployee(input.to_employee_id)
+        onToolCall?.({ tool: 'message_employee', summary: `Messaged ${toEmp?.name || 'employee'}: ${input.message.slice(0, 80)}` })
+        try {
+          const response = await onMessageEmployee?.(employee, input.to_employee_id, input.message)
+          return { result: response || 'No response received.' }
+        } catch (err) {
+          return { result: `Failed to message employee: ${err instanceof Error ? err.message : 'Unknown error'}` }
+        }
       }
     })
   }
@@ -143,6 +167,7 @@ function buildMastraTools(
       content: z.string().describe('Your full updated memory (replaces previous). Include all facts you want to remember.')
     }),
     execute: async (input) => {
+      onToolCall?.({ tool: 'save_memory', summary: 'Saved to persistent memory' })
       store.updateEmployeeMemory(employee.id, input.content)
       return { result: 'Memory saved successfully. Your updated memory will be included in future conversations.' }
     }
@@ -157,13 +182,12 @@ function buildMastraTools(
       tags: z.array(z.string()).optional().describe('Tags for categorization')
     }),
     execute: async (input) => {
+      onToolCall?.({ tool: 'create_knowledge_doc', summary: `Created knowledge doc: ${input.title}` })
       const doc = store.createKnowledge({
         title: input.title,
         content: input.content,
         tags: input.tags || [],
-        lastVerifiedAt: null,
-        docType: 'living',
-        reviewIntervalDays: null
+        docType: 'living'
       })
 
       // Auto-assign to this employee
@@ -187,6 +211,7 @@ function buildMastraTools(
     }),
     execute: async (input) => {
       const updated = store.updateKnowledge(input.doc_id, { content: input.content })
+      onToolCall?.({ tool: 'update_knowledge_doc', summary: `Updated knowledge doc: ${updated?.title || input.doc_id}` })
       if (!updated) return { result: `Document with ID "${input.doc_id}" not found.` }
       return { result: `Document "${updated.title}" updated successfully.` }
     }
@@ -345,6 +370,7 @@ export class AgentManager {
   private store: EmployeeStore
   private onTaskUpdate?: (task: Task) => void
   private onFileWritten?: (data: { conversationId: string; path: string; content: string }) => void
+  private onToolCall?: (data: { conversationId: string; tool: string; summary: string }) => void
 
   constructor(store: EmployeeStore) {
     this.store = store
@@ -358,6 +384,11 @@ export class AgentManager {
   /** Set callback for notifying frontend when a file is written by a tool */
   setFileWrittenCallback(cb: (data: { conversationId: string; path: string; content: string }) => void) {
     this.onFileWritten = cb
+  }
+
+  /** Set callback for notifying frontend when a tool is called */
+  setToolCallCallback(cb: (data: { conversationId: string; tool: string; summary: string }) => void) {
+    this.onToolCall = cb
   }
 
   async sendMessage(
@@ -404,12 +435,17 @@ export class AgentManager {
 
     // Build tools via closure
     const contactable = this.getContactableEmployees(employee)
+    const toolCallCb = this.onToolCall
+      ? (data: { tool: string; summary: string }) => this.onToolCall?.({ conversationId, ...data })
+      : undefined
     const tools = buildMastraTools(
       this.store,
       employee,
       conversationId,
       contactable,
       (fromEmp, args) => this.handleDelegateTask(fromEmp, args),
+      (fromEmp, toId, msg) => this.executeAgentMessage(fromEmp, toId, msg),
+      toolCallCb,
       this.onFileWritten
     )
 
@@ -532,6 +568,70 @@ export class AgentManager {
     const message = `Task delegated to **${toName}** (${toEmployee?.role || 'unknown role'}). They're working on it now.\n\n**Objective:** ${args.objective}\n**Priority:** ${args.priority}\n**Deadline:** ${args.deadline || 'Not specified'}`
 
     return { task, message }
+  }
+
+  /**
+   * Execute an agent-to-agent message: find or create a conversation, add message, run target agent, return response.
+   */
+  async executeAgentMessage(fromEmployee: Employee, toEmployeeId: string, message: string): Promise<string> {
+    const toEmployee = this.store.getEmployee(toEmployeeId)
+    if (!toEmployee) throw new Error('Target employee not found')
+
+    const settings = this.store.getSettings()
+    const provider = settings.providers.find(p => p.id === toEmployee.provider)
+    if (!provider) throw new Error(`Provider ${toEmployee.provider} not configured`)
+    if (!provider.apiKey && provider.id !== 'ollama') throw new Error(`No API key for ${provider.name}`)
+
+    // Find or create the agent-to-agent conversation
+    let conv = this.store.findAgentConversation(fromEmployee.id, toEmployeeId)
+    if (!conv) {
+      conv = this.store.createConversation(fromEmployee.id)
+      // Update with peerEmployeeId and title
+      const conversations = this.store.listConversations(fromEmployee.id)
+      const created = conversations.find(c => c.id === conv!.id)
+      if (created) {
+        // We need to set peerEmployeeId — update the conversation data directly
+        const fullConv = this.store.getConversation(conv.id)
+        if (fullConv) {
+          (fullConv as { peerEmployeeId?: string }).peerEmployeeId = toEmployeeId
+          fullConv.title = `${fromEmployee.name} <> ${toEmployee.name}`
+        }
+      }
+    }
+
+    // Add the sender's message
+    this.store.addMessage(conv.id, {
+      role: 'user',
+      content: `[From ${fromEmployee.name}]: ${message}`
+    })
+
+    // Build system prompt for target employee
+    const systemPrompt = this.buildSystemPrompt(toEmployee)
+
+    // Get conversation history
+    const updatedConv = this.store.getConversation(conv.id)
+    const messages = (updatedConv?.messages || []).map(m => ({
+      role: m.role as 'user' | 'assistant' | 'system',
+      content: m.content
+    }))
+
+    // Run target agent with no tools (simple response)
+    const responseText = await this.runAgent(
+      provider,
+      toEmployee,
+      systemPrompt,
+      messages,
+      () => {},
+      undefined
+    )
+
+    // Store the response
+    this.store.addMessage(conv.id, {
+      role: 'assistant',
+      content: responseText
+    })
+
+    return responseText
   }
 
   /**
@@ -687,13 +787,14 @@ export class AgentManager {
         const deptLabel = dept ? ` — ${dept.name}` : ''
         prompt += `- ${e.name} (${e.role}${deptLabel}) [ID: ${e.id}]\n`
       }
-      prompt += '\nUse the delegate_task tool when work should be handled by someone else.'
+      prompt += '\nUse delegate_task for formal work assignments. Use message_employee for quick questions, clarifications, or lightweight collaboration.'
     }
 
     // Memory and knowledge instructions
-    prompt += '\n\nYou have persistent memory across conversations. Before finishing important conversations, save key facts, decisions, and preferences using save_memory.'
-    prompt += '\nYou can create and update knowledge documents using create_knowledge_doc and update_knowledge_doc.'
-    prompt += '\nYou can use create_scheduled_task to set up recurring automated tasks for yourself or any team member.'
+    prompt += '\n\nYou have persistent memory across conversations. Save key facts, decisions, and preferences using save_memory when they come up — don\'t wait until the end of the conversation.'
+    prompt += '\n\nIf the user tells you something that contradicts or updates information in your knowledge documents, update the document immediately using update_knowledge_doc. Don\'t ask — just update it and mention what you changed.'
+    prompt += '\n\nYou can create new knowledge documents using create_knowledge_doc for important information that should persist.'
+    prompt += '\nYou can use create_scheduled_task to set up recurring automated tasks.'
 
     return prompt
   }

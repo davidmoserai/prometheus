@@ -63,16 +63,23 @@ interface KnowledgeDocument {
   title: string
   content: string
   tags: string[]
-  lastVerifiedAt: string | null
   docType: 'living' | 'reference'
-  reviewIntervalDays: number | null
   createdAt: string
   updatedAt: string
+}
+
+interface ChatAttachment {
+  id: string
+  filename: string
+  path: string
+  mimetype: string
+  size: number
 }
 
 interface Conversation {
   id: string
   employeeId: string
+  peerEmployeeId?: string
   title: string
   messages: ChatMessage[]
   createdAt: string
@@ -86,6 +93,7 @@ interface ChatMessage {
   timestamp: string
   handoffTo?: string
   handoffFrom?: string
+  attachments?: ChatAttachment[]
 }
 
 interface Task {
@@ -212,13 +220,13 @@ interface AppState {
   createKnowledge: (data: Omit<KnowledgeDocument, 'id' | 'createdAt' | 'updatedAt'>) => Promise<KnowledgeDocument>
   updateKnowledge: (id: string, data: Partial<KnowledgeDocument>) => Promise<void>
   deleteKnowledge: (id: string) => Promise<void>
-  verifyKnowledge: (id: string) => Promise<void>
 
   // Actions — Conversations & Chat
   loadConversations: (employeeId: string) => Promise<void>
   createConversation: (employeeId: string) => Promise<Conversation>
   deleteConversation: (conversationId: string) => Promise<void>
   sendMessage: (conversationId: string, message: string) => Promise<void>
+  uploadFile: (conversationId: string, filePath: string) => Promise<ChatAttachment>
 
   // Actions — Tasks
   loadTasks: () => Promise<void>
@@ -419,11 +427,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     await get().loadKnowledge()
   },
 
-  verifyKnowledge: async (id) => {
-    await window.api.knowledge.verify(id)
-    await get().loadKnowledge()
-  },
-
   // Conversations
   loadConversations: async (employeeId: string) => {
     const conversations = await window.api.conversations.list(employeeId)
@@ -461,6 +464,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       }))
     }
     get().clearStreamingContent(conversationId)
+  },
+
+  uploadFile: async (conversationId, filePath) => {
+    return window.api.files.upload(conversationId, filePath)
   },
 
   // Tasks
@@ -571,4 +578,4 @@ export const useAppStore = create<AppState>((set, get) => ({
   }
 }))
 
-export type { Company, Department, ContactAccess, Employee, KnowledgeDocument, Conversation, ChatMessage, Task, RecurringTask, AppNotification, AppSettings, ProviderConfig, ToolAssignment, PermissionSet }
+export type { Company, Department, ContactAccess, Employee, KnowledgeDocument, Conversation, ChatMessage, ChatAttachment, Task, RecurringTask, AppNotification, AppSettings, ProviderConfig, ToolAssignment, PermissionSet }

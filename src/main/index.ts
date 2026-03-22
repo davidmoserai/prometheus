@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Notification, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Notification, shell } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import { join } from 'path'
 import { EmployeeStore } from './store'
@@ -72,7 +72,6 @@ function registerIpcHandlers(): void {
   ipcMain.handle('knowledge:create', (_event, data) => store.createKnowledge(data))
   ipcMain.handle('knowledge:update', (_event, id: string, data) => store.updateKnowledge(id, data))
   ipcMain.handle('knowledge:delete', (_event, id: string) => store.deleteKnowledge(id))
-  ipcMain.handle('knowledge:verify', (_event, id: string) => store.verifyKnowledge(id))
 
   // Conversation IPC Handlers
   ipcMain.handle('conversations:list', (_event, employeeId: string) => store.listConversations(employeeId))
@@ -117,6 +116,22 @@ function registerIpcHandlers(): void {
   ipcMain.handle('recurringTasks:create', (_event, data) => store.createRecurringTask(data))
   ipcMain.handle('recurringTasks:update', (_event, id: string, data) => store.updateRecurringTask(id, data))
   ipcMain.handle('recurringTasks:delete', (_event, id: string) => store.deleteRecurringTask(id))
+
+  // File IPC Handlers
+  ipcMain.handle('files:pick', async () => {
+    if (!mainWindow) return { canceled: true, filePaths: [] }
+    return dialog.showOpenDialog(mainWindow, {
+      properties: ['openFile', 'multiSelections'],
+      filters: [
+        { name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'gif', 'webp'] },
+        { name: 'All Files', extensions: ['*'] }
+      ]
+    })
+  })
+
+  ipcMain.handle('files:upload', (_event, conversationId: string, filePath: string) => {
+    return store.uploadFile(conversationId, filePath)
+  })
 
   // Settings IPC Handlers
   ipcMain.handle('settings:get', () => store.getSettings())
@@ -163,6 +178,11 @@ app.whenReady().then(() => {
   // Push file-written events to frontend
   agentManager.setFileWrittenCallback((data) => {
     mainWindow?.webContents.send('chat:fileWritten', data)
+  })
+
+  // Push tool call events to frontend
+  agentManager.setToolCallCallback((data) => {
+    mainWindow?.webContents.send('chat:toolCall', data)
   })
 
   // Initialize and start the scheduler

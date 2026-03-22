@@ -1,9 +1,15 @@
-import { useState, useEffect, useRef } from 'react'
-import { Send, Plus, MessageSquare, ChevronLeft, Users, ArrowRight, Trash2, Minimize2, FileText, Download } from 'lucide-react'
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { Send, Plus, MessageSquare, ChevronLeft, Users, ArrowRight, Trash2, Minimize2, FileText, Download, Paperclip, X, Brain } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { useAppStore, type Conversation, type ChatMessage } from '@/stores/app-store'
+import { useAppStore, type Conversation, type ChatMessage, type ChatAttachment } from '@/stores/app-store'
+
+interface ToolCallNotice {
+  id: string
+  tool: string
+  summary: string
+}
 
 export function ChatPage() {
   const {
@@ -21,7 +27,8 @@ export function ChatPage() {
     setActiveView,
     setCreatingEmployee,
     getTokenCount,
-    compressConversation
+    compressConversation,
+    uploadFile
   } = useAppStore()
 
   const [input, setInput] = useState('')
@@ -29,8 +36,11 @@ export function ChatPage() {
   const [tokenCount, setTokenCount] = useState(0)
   const [isCompressing, setIsCompressing] = useState(false)
   const [writtenFiles, setWrittenFiles] = useState<{ path: string; content: string }[]>([])
+  const [stagedAttachments, setStagedAttachments] = useState<ChatAttachment[]>([])
+  const [toolCallNotices, setToolCallNotices] = useState<ToolCallNotice[]>([])
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const dropZoneRef = useRef<HTMLDivElement>(null)
 
   const selectedEmployee = employees.find((e) => e.id === selectedEmployeeId)
   const activeConversation = conversations.find((c) => c.id === selectedConversationId)
@@ -44,7 +54,7 @@ export function ChatPage() {
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [activeConversation?.messages, currentStreaming])
+  }, [activeConversation?.messages, currentStreaming, toolCallNotices])
 
   // Update token count when conversation changes
   useEffect(() => {
@@ -66,10 +76,88 @@ export function ChatPage() {
     return () => { unsub() }
   }, [selectedConversationId])
 
+  // Listen for tool call events
+  useEffect(() => {
+    if (!window.api?.chat?.onToolCall) return
+    const unsub = window.api.chat.onToolCall((data) => {
+      if (data.conversationId === selectedConversationId) {
+        setToolCallNotices(prev => [...prev, {
+          id: `tc-${Date.now()}-${Math.random()}`,
+          tool: data.tool,
+          summary: data.summary
+        }])
+      }
+    })
+    return () => { unsub() }
+  }, [selectedConversationId])
+
+  // Clear tool call notices when conversation changes
+  useEffect(() => {
+    setToolCallNotices([])
+    setWrittenFiles([])
+  }, [selectedConversationId])
+
+  const handlePickFiles = useCallback(async () => {
+    if (!window.api?.files?.pick) return
+    const result = await window.api.files.pick()
+    if (result.canceled || !result.filePaths?.length) return
+
+    let convId = selectedConversationId
+    if (!convId && selectedEmployeeId) {
+      const conv = await createConversation(selectedEmployeeId)
+      convId = conv.id
+    }
+    if (!convId) return
+
+    for (const filePath of result.filePaths) {
+      const attachment = await uploadFile(convId, filePath)
+      setStagedAttachments(prev => [...prev, attachment])
+    }
+  }, [selectedConversationId, selectedEmployeeId, createConversation, uploadFile])
+
+  const handleDrop = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const files = Array.from(e.dataTransfer.files)
+    if (!files.length) return
+
+    let convId = selectedConversationId
+    if (!convId && selectedEmployeeId) {
+      const conv = await createConversation(selectedEmployeeId)
+      convId = conv.id
+    }
+    if (!convId) return
+
+    // For drag-and-drop in Electron, we can access the file path
+    for (const file of files) {
+      if ((file as unknown as { path?: string }).path) {
+        const attachment = await uploadFile(convId, (file as unknown as { path: string }).path)
+        setStagedAttachments(prev => [...prev, attachment])
+      }
+    }
+  }, [selectedConversationId, selectedEmployeeId, createConversation, uploadFile])
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+  }, [])
+
   const handleSend = async () => {
-    if (!input.trim() || isSending) return
-    const msg = input.trim()
+    if (!input.trim() && stagedAttachments.length === 0) return
+    if (isSending) return
+    let msg = input.trim()
+
+    // Append attachment info to message for the agent
+    if (stagedAttachments.length > 0) {
+      const attachInfo = stagedAttachments.map(a =>
+        `\n[Attached: ${a.filename}] (path: ${a.path})`
+      ).join('')
+      msg = msg + attachInfo
+    }
+
     setInput('')
+    const attachmentsToSend = [...stagedAttachments]
+    setStagedAttachments([])
 
     let convId = selectedConversationId
     if (!convId && selectedEmployeeId) {
@@ -79,6 +167,7 @@ export function ChatPage() {
     if (!convId) return
 
     setIsSending(true)
+    setToolCallNotices([])
     try {
       await sendMessage(convId, msg)
     } finally {
@@ -104,6 +193,18 @@ export function ChatPage() {
       e.preventDefault()
       handleSend()
     }
+  }
+
+  const removeStagedAttachment = (id: string) => {
+    setStagedAttachments(prev => prev.filter(a => a.id !== id))
+  }
+
+  // Tool call icon helper
+  const getToolIcon = (tool: string) => {
+    if (tool === 'save_memory') return <Brain className="w-3.5 h-3.5 text-violet-400" />
+    if (tool === 'create_knowledge_doc' || tool === 'update_knowledge_doc') return <FileText className="w-3.5 h-3.5 text-sky-400" />
+    if (tool === 'delegate_task' || tool === 'message_employee') return <Users className="w-3.5 h-3.5 text-flame-400" />
+    return <FileText className="w-3.5 h-3.5 text-text-tertiary" />
   }
 
   // No employee selected -- show employee picker
@@ -200,28 +301,44 @@ export function ChatPage() {
         </div>
 
         <div className="relative flex-1 overflow-y-auto z-10 flex flex-col" style={{ paddingLeft: '8px', paddingRight: '8px', paddingBottom: '8px', gap: '2px' }}>
-          {conversations.map((conv) => (
-            <div
-              key={conv.id}
-              onClick={() => setSelectedConversation(conv.id)}
-              className={`group/conv flex items-center w-full rounded-xl text-left transition-all duration-300 cursor-pointer ${
-                selectedConversationId === conv.id
-                  ? 'bg-bg-tertiary text-text-primary'
-                  : 'text-text-tertiary hover:text-text-secondary hover:bg-bg-tertiary/50'
-              }`}
-              style={{ gap: '10px', padding: '8px 12px' }}
-            >
-              <MessageSquare className={`w-3.5 h-3.5 shrink-0 ${selectedConversationId === conv.id ? 'text-flame-400' : ''}`} />
-              <span className="text-[13px] truncate flex-1">{conv.title}</span>
-              <button
-                onClick={(e) => { e.stopPropagation(); deleteConversation(conv.id) }}
-                className="opacity-0 group-hover/conv:opacity-100 text-text-tertiary hover:text-ember-400 transition-all cursor-pointer shrink-0"
-                style={{ padding: '2px' }}
+          {conversations.map((conv) => {
+            const peerEmp = conv.peerEmployeeId ? employees.find(e => e.id === conv.peerEmployeeId) : null
+            const isAgentChat = !!conv.peerEmployeeId
+
+            return (
+              <div
+                key={conv.id}
+                onClick={() => setSelectedConversation(conv.id)}
+                className={`group/conv flex items-center w-full rounded-xl text-left transition-all duration-300 cursor-pointer ${
+                  selectedConversationId === conv.id
+                    ? 'bg-bg-tertiary text-text-primary'
+                    : 'text-text-tertiary hover:text-text-secondary hover:bg-bg-tertiary/50'
+                }`}
+                style={{ gap: '10px', padding: '8px 12px' }}
               >
-                <Trash2 className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          ))}
+                {isAgentChat ? (
+                  <div className="flex items-center shrink-0" style={{ gap: '2px' }}>
+                    <span className="text-[11px]">{selectedEmployee?.avatar}</span>
+                    <span className="text-[10px] text-text-tertiary">x</span>
+                    <span className="text-[11px]">{peerEmp?.avatar || '?'}</span>
+                  </div>
+                ) : (
+                  <MessageSquare className={`w-3.5 h-3.5 shrink-0 ${selectedConversationId === conv.id ? 'text-flame-400' : ''}`} />
+                )}
+                <span className="text-[13px] truncate flex-1">{conv.title}</span>
+                {isAgentChat && (
+                  <Badge variant="secondary" className="text-[9px] shrink-0">Agent</Badge>
+                )}
+                <button
+                  onClick={(e) => { e.stopPropagation(); deleteConversation(conv.id) }}
+                  className="opacity-0 group-hover/conv:opacity-100 text-text-tertiary hover:text-ember-400 transition-all cursor-pointer shrink-0"
+                  style={{ padding: '2px' }}
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )
+          })}
           {conversations.length === 0 && (
             <p className="text-[11px] text-text-tertiary text-center" style={{ paddingTop: '24px', paddingBottom: '24px' }}>No conversations yet</p>
           )}
@@ -234,6 +351,19 @@ export function ChatPage() {
           <>
             {/* Token counter header */}
             <div className="flex items-center justify-end border-b border-border-default" style={{ padding: '8px 32px', gap: '12px' }}>
+              {/* Show peer employee info for agent-to-agent chats */}
+              {activeConversation.peerEmployeeId && (() => {
+                const peer = employees.find(e => e.id === activeConversation.peerEmployeeId)
+                return peer ? (
+                  <div className="flex items-center flex-1" style={{ gap: '8px' }}>
+                    <span className="text-[12px]">{selectedEmployee?.avatar}</span>
+                    <span className="text-[11px] text-text-tertiary">with</span>
+                    <span className="text-[12px]">{peer.avatar}</span>
+                    <span className="text-[11px] text-text-secondary font-medium">{peer.name}</span>
+                    <Badge variant="secondary" className="text-[9px]">Agent Chat</Badge>
+                  </div>
+                ) : null
+              })()}
               <span className="text-[11px] text-text-tertiary tabular-nums">
                 ~{tokenCount.toLocaleString()} tokens
               </span>
@@ -254,6 +384,17 @@ export function ChatPage() {
             <div className="flex-1 overflow-y-auto flex flex-col" style={{ paddingLeft: '32px', paddingRight: '32px', paddingTop: '24px', paddingBottom: '24px', gap: '20px' }}>
               {activeConversation.messages.map((msg) => (
                 <MessageBubble key={msg.id} message={msg} employeeName={selectedEmployee?.name} employeeAvatar={selectedEmployee?.avatar} />
+              ))}
+              {/* Tool call notices (inline during streaming) */}
+              {toolCallNotices.map((notice) => (
+                <div
+                  key={notice.id}
+                  className="flex items-center rounded-xl bg-white/[0.03] border border-border-default animate-fade-in"
+                  style={{ gap: '10px', padding: '8px 14px', maxWidth: '480px' }}
+                >
+                  {getToolIcon(notice.tool)}
+                  <span className="text-[12px] text-text-tertiary">{notice.summary}</span>
+                </div>
               ))}
               {currentStreaming && currentStreaming.length > 0 && !activeConversation.messages.find(m => m.role === 'assistant' && m.content === currentStreaming) && (
                 <div className="flex animate-fade-in" style={{ gap: '14px' }}>
@@ -302,9 +443,58 @@ export function ChatPage() {
               <div ref={messagesEndRef} />
             </div>
 
+            {/* Staged attachments preview */}
+            {stagedAttachments.length > 0 && (
+              <div className="border-t border-border-default" style={{ paddingLeft: '32px', paddingRight: '32px', paddingTop: '10px', paddingBottom: '4px' }}>
+                <div className="flex flex-wrap max-w-3xl mx-auto" style={{ gap: '8px' }}>
+                  {stagedAttachments.map((att) => {
+                    const isImage = att.mimetype.startsWith('image/')
+                    return (
+                      <div
+                        key={att.id}
+                        className="relative group rounded-lg border border-border-default bg-bg-elevated overflow-hidden"
+                        style={{ width: isImage ? '64px' : 'auto', height: isImage ? '64px' : 'auto', padding: isImage ? '0' : '6px 10px' }}
+                      >
+                        {isImage ? (
+                          <img
+                            src={`file://${att.path}`}
+                            alt={att.filename}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <div className="flex items-center" style={{ gap: '6px' }}>
+                            <FileText className="w-3.5 h-3.5 text-text-tertiary shrink-0" />
+                            <span className="text-[11px] text-text-secondary truncate max-w-[120px]">{att.filename}</span>
+                          </div>
+                        )}
+                        <button
+                          onClick={() => removeStagedAttachment(att.id)}
+                          className="absolute top-0 right-0 flex items-center justify-center w-5 h-5 rounded-bl-lg bg-bg-primary/80 text-text-tertiary hover:text-ember-400 transition-colors cursor-pointer opacity-0 group-hover:opacity-100"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
             {/* Input */}
-            <div style={{ paddingLeft: '32px', paddingRight: '32px', paddingTop: '20px', paddingBottom: '20px' }}>
+            <div
+              ref={dropZoneRef}
+              onDragOver={handleDragOver}
+              onDrop={handleDrop}
+              style={{ paddingLeft: '32px', paddingRight: '32px', paddingTop: '20px', paddingBottom: '20px' }}
+            >
               <div className="flex items-end max-w-3xl mx-auto" style={{ gap: '10px' }}>
+                <button
+                  onClick={handlePickFiles}
+                  className="shrink-0 flex items-center justify-center w-[48px] h-[48px] rounded-2xl border border-border-default bg-bg-tertiary text-text-tertiary hover:text-text-primary hover:border-border-bright transition-all cursor-pointer"
+                  title="Attach files"
+                >
+                  <Paperclip className="w-4 h-4" />
+                </button>
                 <div className="flex-1 relative">
                   <textarea
                     ref={inputRef}
@@ -320,7 +510,7 @@ export function ChatPage() {
                 <Button
                   size="icon"
                   onClick={handleSend}
-                  disabled={!input.trim() || isSending}
+                  disabled={(!input.trim() && stagedAttachments.length === 0) || isSending}
                   className="shrink-0 h-[48px] w-[48px] rounded-2xl"
                 >
                   <Send className="w-4 h-4" />
@@ -372,6 +562,7 @@ function MessageBubble({
   employeeAvatar?: string
 }) {
   const isUser = message.role === 'user'
+  const imageAttachments = (message.attachments || []).filter(a => a.mimetype.startsWith('image/'))
 
   return (
     <div className={`flex animate-fade-in ${isUser ? 'flex-row-reverse' : ''}`} style={{ gap: '14px' }}>
@@ -395,6 +586,19 @@ function MessageBubble({
             <div className="chat-markdown">
               <ReactMarkdown>{message.content}</ReactMarkdown>
             </div>
+            {/* Inline image attachments */}
+            {imageAttachments.length > 0 && (
+              <div className="flex flex-wrap" style={{ gap: '8px', marginTop: '10px' }}>
+                {imageAttachments.map((att) => (
+                  <img
+                    key={att.id}
+                    src={`file://${att.path}`}
+                    alt={att.filename}
+                    className="rounded-lg border border-white/10 max-w-[240px] max-h-[200px] object-cover"
+                  />
+                ))}
+              </div>
+            )}
           </div>
           <p className={`text-[11px] ${isUser ? 'text-right' : ''} text-text-tertiary`} style={{ marginTop: '6px' }}>
             {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}

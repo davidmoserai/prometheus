@@ -32,22 +32,24 @@ Tailwind spacing utilities (`p-7`, `mb-5`, `gap-6`, etc.) do NOT render at corre
 - **Ollama Cloud** — DeepSeek 671B, Qwen 480B via subscription, `https://ollama.com/api`
 - **Ollama (Local)** — Free local models at `localhost:11434`
 
-## Inter-Agent Task Delegation
-- Employees can delegate work to other employees via `delegate_task` tool (based on `contactAccess` permissions)
+## Inter-Agent Communication
+- **Task delegation**: `delegate_task` tool for formal work assignments (Agent Brief format)
+- **Agent-to-agent chat**: `message_employee` tool for quick questions/collaboration between agents
+- Agent chats stored as conversations with `peerEmployeeId` linking the two participants
+- `executeAgentMessage()` in agent-manager finds/creates conversation, runs target agent, returns response
 - Tasks use the **Agent Brief** format (objective, context, deliverable, acceptance criteria, escalation conditions)
 - Task data stored in `CompanyData.tasks[]`, CRUD via `tasks:*` IPC channels
-- Agent manager injects team member list into system prompt and provides `delegate_task` tool to LLM
-- Supports both OpenAI-compatible (function calling) and Anthropic (tool_use) formats
+- Agent manager injects team member list into system prompt and provides both tools to LLM
 - Tasks page at `components/tasks/tasks-page.tsx` — grouped by status (escalated/pending/in_progress/completed)
 
-## Tool System (Unified Zod Definitions)
-- Tools defined once with Zod schemas in `TOOL_DEFS` record, converted to OpenAI/Anthropic format automatically
+## Tool System (Mastra + Zod Definitions)
+- Tools built dynamically per request in `buildMastraTools()` using Mastra `createTool` + Zod schemas
 - **Memory tools** (always available): `save_memory`, `create_knowledge_doc`, `update_knowledge_doc`
 - **Builtin tools** (per employee config): `web_search`, `web_browse`, `read_file`, `write_file`, `execute_code`
-- **Delegation**: `delegate_task` (when employee has contactable employees)
+- **Delegation**: `delegate_task`, `message_employee` (when employee has contactable employees)
 - **Scheduling**: `create_scheduled_task` (always available)
-- `executeTool()` in agent-manager handles all tool execution
-- Tool call flow supports multi-round tool use (up to 5 rounds)
+- **Tool call visibility**: `onToolCall` callback emits `chat:toolCall` IPC events for save_memory, knowledge docs, delegate/message tools
+- Tool call notices displayed inline in chat as subtle cards with icons (Brain, FileText, Users)
 - `write_file` emits `chat:fileWritten` event to show download cards in chat UI
 
 ## Agent Memory System
@@ -57,6 +59,17 @@ Tailwind spacing utilities (`p-7`, `mb-5`, `gap-6`, etc.) do NOT render at corre
 - Employee editor shows memory (read-only) with "Clear Memory" button
 - Agents can create/update knowledge docs via `create_knowledge_doc` / `update_knowledge_doc` tools
 - Knowledge doc IDs shown in system prompt so agents can reference them
+- `KnowledgeDocument` has `docType` ('living' | 'reference') — no verification/review system (removed for simplicity)
+- Agents are instructed to auto-update knowledge docs when they learn contradicting information
+
+## File Upload in Chat
+- `ChatAttachment` type: `{ id, filename, path, mimetype, size }`
+- `ChatMessage.attachments?: ChatAttachment[]` — optional attachments on messages
+- `store.uploadFile(conversationId, sourcePath)` — copies file to `{userData}/prometheus-data/files/{conversationId}/`
+- `store.deleteConversation()` cleans up conversation files directory via `rmSync`
+- IPC: `files:pick` (opens native file dialog), `files:upload` (copies and returns metadata)
+- Chat UI: Paperclip button to pick files, drag-and-drop on input area, image preview thumbnails for staged attachments
+- Image attachments rendered inline in message bubbles
 
 ## Token Counting + Conversation Compression
 - `countTokens()` uses `Math.ceil(text.length / 4)` heuristic

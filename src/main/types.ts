@@ -61,9 +61,7 @@ export interface KnowledgeDocument {
   title: string
   content: string
   tags: string[]
-  lastVerifiedAt: string | null
   docType: 'living' | 'reference'
-  reviewIntervalDays: number | null
   createdAt: string
   updatedAt: string
 }
@@ -71,10 +69,19 @@ export interface KnowledgeDocument {
 export interface Conversation {
   id: string
   employeeId: string
+  peerEmployeeId?: string
   title: string
   messages: ChatMessage[]
   createdAt: string
   updatedAt: string
+}
+
+export interface ChatAttachment {
+  id: string
+  filename: string
+  path: string
+  mimetype: string
+  size: number
 }
 
 export interface ChatMessage {
@@ -84,6 +91,7 @@ export interface ChatMessage {
   timestamp: string
   handoffTo?: string
   handoffFrom?: string
+  attachments?: ChatAttachment[]
 }
 
 export interface Task {

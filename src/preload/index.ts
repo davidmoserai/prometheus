@@ -29,8 +29,11 @@ const api = {
     list: () => ipcRenderer.invoke('knowledge:list'),
     create: (data: unknown) => ipcRenderer.invoke('knowledge:create', data),
     update: (id: string, data: unknown) => ipcRenderer.invoke('knowledge:update', id, data),
-    delete: (id: string) => ipcRenderer.invoke('knowledge:delete', id),
-    verify: (id: string) => ipcRenderer.invoke('knowledge:verify', id)
+    delete: (id: string) => ipcRenderer.invoke('knowledge:delete', id)
+  },
+  files: {
+    pick: () => ipcRenderer.invoke('files:pick'),
+    upload: (conversationId: string, filePath: string) => ipcRenderer.invoke('files:upload', conversationId, filePath)
   },
   conversations: {
     list: (employeeId: string) => ipcRenderer.invoke('conversations:list', employeeId),
@@ -71,6 +74,11 @@ const api = {
       const handler = (_event: unknown, data: { conversationId: string; path: string; content: string }) => callback(data)
       ipcRenderer.on('chat:fileWritten', handler)
       return () => ipcRenderer.removeListener('chat:fileWritten', handler)
+    },
+    onToolCall: (callback: (data: { conversationId: string; tool: string; summary: string }) => void) => {
+      const handler = (_event: unknown, data: { conversationId: string; tool: string; summary: string }) => callback(data)
+      ipcRenderer.on('chat:toolCall', handler)
+      return () => ipcRenderer.removeListener('chat:toolCall', handler)
     }
   },
   recurringTasks: {
