@@ -56,6 +56,11 @@ const api = {
       const handler = (_event: unknown, data: { conversationId: string; chunk: string }) => callback(data)
       ipcRenderer.on('chat:stream', handler)
       return () => ipcRenderer.removeListener('chat:stream', handler)
+    },
+    onMessageStored: (callback: (data: { conversationId: string; message: unknown }) => void) => {
+      const handler = (_event: unknown, data: { conversationId: string; message: unknown }) => callback(data)
+      ipcRenderer.on('chat:messageStored', handler)
+      return () => ipcRenderer.removeListener('chat:messageStored', handler)
     }
   },
   settings: {

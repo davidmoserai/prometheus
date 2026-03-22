@@ -6,7 +6,7 @@ import { ChatPage } from '@/components/chat/chat-page'
 import { KnowledgePage } from '@/components/knowledge/knowledge-page'
 import { TasksPage } from '@/components/tasks/tasks-page'
 import { SettingsPage } from '@/components/settings/settings-page'
-import { useAppStore } from '@/stores/app-store'
+import { useAppStore, type ChatMessage } from '@/stores/app-store'
 
 export default function App() {
   const { activeView, loadCompanies, loadEmployees, loadTerminatedEmployees, loadDepartments, loadKnowledge, loadTasks, loadSettings } = useAppStore()
@@ -32,6 +32,22 @@ export default function App() {
     if (!window.api?.chat?.onStream) return
     const unsub = window.api.chat.onStream((data) => {
       useAppStore.getState().setStreamingContent(data.conversationId, data.chunk)
+    })
+    return unsub
+  }, [])
+
+  // Set up message stored listener (backend confirms user/assistant messages)
+  useEffect(() => {
+    if (!window.api?.chat?.onMessageStored) return
+    const unsub = window.api.chat.onMessageStored((data) => {
+      const msg = data.message as ChatMessage
+      useAppStore.setState((state) => ({
+        conversations: state.conversations.map(c =>
+          c.id === data.conversationId
+            ? { ...c, messages: [...c.messages.filter(m => !m.id.startsWith('temp-')), msg] }
+            : c
+        )
+      }))
     })
     return unsub
   }, [])

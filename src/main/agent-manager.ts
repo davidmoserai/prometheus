@@ -22,10 +22,12 @@ export class AgentManager {
   async sendMessage(
     conversationId: string,
     content: string,
-    onStream: (chunk: string) => void
+    onStream: (chunk: string) => void,
+    onMessageStored?: (msg: ChatMessage) => void
   ): Promise<ChatMessage> {
-    // Store user message
-    this.store.addMessage(conversationId, { role: 'user', content })
+    // Store user message and notify frontend immediately
+    const userMsg = this.store.addMessage(conversationId, { role: 'user', content })
+    onMessageStored?.(userMsg)
 
     const conversation = this.store.getConversation(conversationId)
     if (!conversation) throw new Error('Conversation not found')

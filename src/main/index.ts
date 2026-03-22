@@ -85,9 +85,16 @@ function registerIpcHandlers(): void {
 
   // Chat IPC Handler
   ipcMain.handle('chat:send', async (_event, conversationId: string, message: string) => {
-    return agentManager.sendMessage(conversationId, message, (chunk) => {
-      mainWindow?.webContents.send('chat:stream', { conversationId, chunk })
-    })
+    return agentManager.sendMessage(
+      conversationId,
+      message,
+      (chunk) => {
+        mainWindow?.webContents.send('chat:stream', { conversationId, chunk })
+      },
+      (msg) => {
+        mainWindow?.webContents.send('chat:messageStored', { conversationId, message: msg })
+      }
+    )
   })
 
   // Settings IPC Handlers

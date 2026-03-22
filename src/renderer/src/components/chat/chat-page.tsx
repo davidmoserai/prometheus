@@ -53,19 +53,6 @@ export function ChatPage() {
     }
     if (!convId) return
 
-    // Optimistically add user message to conversation immediately
-    const optimisticMsg: ChatMessage = {
-      id: `temp-${Date.now()}`,
-      role: 'user',
-      content: msg,
-      timestamp: new Date().toISOString()
-    }
-    useAppStore.setState((state) => ({
-      conversations: state.conversations.map(c =>
-        c.id === convId ? { ...c, messages: [...c.messages, optimisticMsg] } : c
-      )
-    }))
-
     setIsSending(true)
     try {
       await sendMessage(convId, msg)
