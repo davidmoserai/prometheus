@@ -375,7 +375,7 @@ export function TasksPage() {
                         value={scheduledForm.scheduleTime}
                         onChange={(e) => setScheduledForm(f => ({ ...f, scheduleTime: e.target.value }))}
                         className="w-full rounded-xl bg-bg-tertiary border border-border-default text-[13px] text-text-primary focus:outline-none focus:ring-2 focus:ring-flame-500/25 focus:border-flame-500/40"
-                        style={{ padding: '10px 14px' }}
+                        style={{ padding: '10px 14px', colorScheme: 'dark' }}
                       />
                     </div>
                   )}
