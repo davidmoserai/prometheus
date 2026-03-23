@@ -498,6 +498,7 @@ export function installMockApi() {
       setApiKey: async (_apiKey: string) => ({ success: true }),
       getCatalog: async () => [],
       listApps: async () => ({}),
+      listActiveIntegrations: async () => [],
       authorize: async (_appId: string) => ({ success: false, error: 'Not available in web preview' }),
       waitForConnection: async (_appId: string) => ({ success: false }),
       disconnect: async (_appId: string) => ({ success: true })

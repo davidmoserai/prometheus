@@ -247,15 +247,15 @@ function registerIpcHandlers(): void {
     return { success: true }
   })
 
-  ipcMain.handle('composio:getCatalog', async () => {
-    if (composioManager) {
-      try {
-        return await composioManager.getCatalog()
-      } catch {
-        // Fall back to static catalog on error
-      }
+  ipcMain.handle('composio:getCatalog', () => INTEGRATION_CATALOG)
+
+  ipcMain.handle('composio:listActiveIntegrations', async () => {
+    if (!composioManager) return []
+    try {
+      return await composioManager.listActiveIntegrations()
+    } catch {
+      return []
     }
-    return INTEGRATION_CATALOG
   })
 
   ipcMain.handle('composio:listApps', async () => {

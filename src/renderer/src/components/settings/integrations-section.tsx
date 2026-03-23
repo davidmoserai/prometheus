@@ -1,41 +1,38 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { CheckCircle, Circle, Loader2, ExternalLink, Key } from 'lucide-react'
+import { CheckCircle, ExternalLink, Key, Loader2, Trash2 } from 'lucide-react'
 import { useAppStore } from '../../stores/app-store'
 import type { IntegrationDefinition } from '../../../../main/integration-catalog'
 
 export function IntegrationsSection(): React.JSX.Element {
   const {
     composioApiKeySet,
-    composioConnectedApps,
     loadComposioStatus,
     setComposioApiKey,
-    connectIntegration,
-    waitForIntegrationConnection,
     disconnectIntegration
   } = useAppStore()
 
-  const [catalog, setCatalog] = useState<IntegrationDefinition[]>([])
+  const [activeIntegrations, setActiveIntegrations] = useState<IntegrationDefinition[]>([])
+  const [loading, setLoading] = useState(false)
   const [apiKeyInput, setApiKeyInput] = useState('')
   const [savingKey, setSavingKey] = useState(false)
   const [keyError, setKeyError] = useState('')
-  const [connectingApp, setConnectingApp] = useState<string | null>(null)
-  const [waitingApp, setWaitingApp] = useState<string | null>(null)
+  const [disconnecting, setDisconnecting] = useState<string | null>(null)
 
-  const loadCatalog = useCallback(async (): Promise<void> => {
-    if (window.api?.composio) {
-      const items = await window.api.composio.getCatalog()
-      setCatalog(items || [])
+  const loadActive = useCallback(async (): Promise<void> => {
+    if (!window.api?.composio) return
+    setLoading(true)
+    try {
+      const items = await window.api.composio.listActiveIntegrations()
+      setActiveIntegrations(items || [])
+    } finally {
+      setLoading(false)
     }
   }, [])
 
-  // Load catalog and connection status on mount
   useEffect(() => {
-    const load = async (): Promise<void> => {
-      await loadCatalog()
-      await loadComposioStatus()
-    }
-    load()
-  }, [loadCatalog, loadComposioStatus])
+    if (composioApiKeySet) loadActive()
+    else loadComposioStatus()
+  }, [composioApiKeySet, loadActive, loadComposioStatus])
 
   const handleSaveApiKey = useCallback(async (): Promise<void> => {
     if (!apiKeyInput.trim()) return
@@ -44,49 +41,23 @@ export function IntegrationsSection(): React.JSX.Element {
     try {
       await setComposioApiKey(apiKeyInput.trim())
       setApiKeyInput('')
-      // Reload live catalog now that we have a valid key
-      await loadCatalog()
+      await loadActive()
     } catch {
       setKeyError('Invalid API key — please check and try again')
     } finally {
       setSavingKey(false)
     }
-  }, [apiKeyInput, setComposioApiKey])
-
-  const handleConnect = useCallback(async (appId: string): Promise<void> => {
-    setConnectingApp(appId)
-    try {
-      const result = await connectIntegration(appId)
-      if (result.success) {
-        setWaitingApp(appId)
-        setConnectingApp(null)
-        // Poll for connection completion
-        const connected = await waitForIntegrationConnection(appId)
-        if (!connected) {
-          console.error(`Connection to ${appId} timed out or failed`)
-        }
-        setWaitingApp(null)
-      }
-    } finally {
-      setConnectingApp(null)
-    }
-  }, [connectIntegration, waitForIntegrationConnection])
+  }, [apiKeyInput, setComposioApiKey, loadActive])
 
   const handleDisconnect = useCallback(async (appId: string): Promise<void> => {
-    setConnectingApp(appId)
+    setDisconnecting(appId)
     try {
       await disconnectIntegration(appId)
+      setActiveIntegrations(prev => prev.filter(a => a.id !== appId))
     } finally {
-      setConnectingApp(null)
+      setDisconnecting(null)
     }
   }, [disconnectIntegration])
-
-  // Group catalog by category
-  const categories = catalog.reduce<Record<string, IntegrationDefinition[]>>((acc, item) => {
-    if (!acc[item.category]) acc[item.category] = []
-    acc[item.category].push(item)
-    return acc
-  }, {})
 
   return (
     <div>
@@ -108,7 +79,7 @@ export function IntegrationsSection(): React.JSX.Element {
             <p className="text-sm font-medium text-text-primary">Connect your Composio account</p>
           </div>
           <p className="text-sm text-text-tertiary" style={{ marginBottom: '16px' }}>
-            Integrations are powered by Composio, which securely stores your OAuth tokens so you never have to log in again.{' '}
+            Integrations are powered by Composio, which securely stores your OAuth tokens.{' '}
             <a
               href="https://app.composio.dev/settings"
               target="_blank"
@@ -116,7 +87,7 @@ export function IntegrationsSection(): React.JSX.Element {
               className="text-flame-400 hover:text-flame-300 inline-flex items-center transition-colors"
               style={{ gap: '4px' }}
             >
-              Get your API key <ExternalLink size={12} />
+              Get your free API key <ExternalLink size={12} />
             </a>
           </p>
           <div className="flex items-center" style={{ gap: '12px' }}>
@@ -148,92 +119,76 @@ export function IntegrationsSection(): React.JSX.Element {
         </div>
       )}
 
-      {/* App Grid — only shown when API key is set */}
-      {composioApiKeySet && Object.entries(categories).map(([category, apps]) => (
-        <div key={category} style={{ marginBottom: '28px' }}>
-          <h3 className="text-xs font-semibold text-text-tertiary uppercase tracking-wider" style={{ marginBottom: '12px' }}>
-            {category}
-          </h3>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '10px' }}>
-            {apps.map(app => {
-              const isConnected = composioConnectedApps[app.id] === true
-              const isConnecting = connectingApp === app.id
-              const isWaiting = waitingApp === app.id
-
-              return (
-                <div
-                  key={app.id}
-                  className={`rounded-xl border transition-colors ${
-                    isConnected
-                      ? 'border-emerald-500/20 bg-emerald-500/[0.04]'
-                      : 'border-border-default bg-bg-elevated hover:border-border-bright'
-                  }`}
-                  style={{ padding: '14px 16px' }}
+      {/* Active integrations */}
+      {composioApiKeySet && (
+        <div>
+          {loading ? (
+            <div className="flex items-center" style={{ gap: '8px' }}>
+              <Loader2 size={14} className="animate-spin text-text-tertiary" />
+              <span className="text-sm text-text-tertiary">Loading your integrations...</span>
+            </div>
+          ) : activeIntegrations.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-border-default text-center" style={{ padding: '48px 24px' }}>
+              <p className="text-text-secondary text-sm font-medium" style={{ marginBottom: '8px' }}>No integrations connected yet</p>
+              <p className="text-text-tertiary text-sm" style={{ marginBottom: '20px' }}>
+                Connect your apps on Composio, then come back here — they'll appear automatically.
+              </p>
+              <a
+                href="https://app.composio.dev"
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center rounded-xl bg-flame-500 text-white text-sm font-medium hover:bg-flame-400 transition-colors"
+                style={{ padding: '0 16px', height: '36px', gap: '6px', borderRadius: '10px' }}
+              >
+                Connect apps on Composio <ExternalLink size={12} />
+              </a>
+            </div>
+          ) : (
+            <div>
+              <div className="flex items-center justify-between" style={{ marginBottom: '14px' }}>
+                <h3 className="text-xs font-semibold text-text-tertiary uppercase tracking-wider">Connected apps</h3>
+                <a
+                  href="https://app.composio.dev"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center text-xs text-flame-400 hover:text-flame-300 transition-colors"
+                  style={{ gap: '4px' }}
                 >
-                  {/* App header */}
-                  <div className="flex items-center" style={{ gap: '10px', marginBottom: '10px' }}>
-                    {app.logo
-                      ? <img src={app.logo} alt={app.name} style={{ width: '24px', height: '24px', borderRadius: '6px', objectFit: 'contain' }} />
-                      : <span style={{ fontSize: '20px' }}>{app.icon}</span>
-                    }
-                    <div>
-                      <p className="text-sm font-medium text-text-primary">{app.name}</p>
-                      <p className="text-xs text-text-tertiary">{app.description}</p>
+                  Add more apps <ExternalLink size={11} />
+                </a>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {activeIntegrations.map(app => (
+                  <div
+                    key={app.id}
+                    className="flex items-center justify-between rounded-xl border border-emerald-500/20 bg-emerald-500/[0.04]"
+                    style={{ padding: '12px 16px' }}
+                  >
+                    <div className="flex items-center" style={{ gap: '12px' }}>
+                      {app.logo
+                        ? <img src={app.logo} alt={app.name} style={{ width: '28px', height: '28px', borderRadius: '6px', objectFit: 'contain' }} />
+                        : <span style={{ fontSize: '22px' }}>{app.icon}</span>
+                      }
+                      <div className="flex items-center" style={{ gap: '6px' }}>
+                        <span className="text-sm font-medium text-text-primary">{app.name}</span>
+                        <CheckCircle size={12} className="text-emerald-400" />
+                      </div>
                     </div>
+                    <button
+                      onClick={() => handleDisconnect(app.id)}
+                      disabled={disconnecting === app.id}
+                      className="text-text-quaternary hover:text-red-400 transition-colors disabled:opacity-50"
+                    >
+                      {disconnecting === app.id
+                        ? <Loader2 size={14} className="animate-spin" />
+                        : <Trash2 size={14} />
+                      }
+                    </button>
                   </div>
-
-                  {/* Status + action */}
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center" style={{ gap: '5px' }}>
-                      {isConnected ? (
-                        <>
-                          <CheckCircle size={12} className="text-emerald-400" />
-                          <span className="text-xs text-emerald-400">Connected</span>
-                        </>
-                      ) : isWaiting ? (
-                        <>
-                          <Loader2 size={12} className="text-text-tertiary animate-spin" />
-                          <span className="text-xs text-text-tertiary">Waiting...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Circle size={12} className="text-text-quaternary" />
-                          <span className="text-xs text-text-tertiary">Not connected</span>
-                        </>
-                      )}
-                    </div>
-
-                    {isConnected ? (
-                      <button
-                        onClick={() => handleDisconnect(app.id)}
-                        disabled={isConnecting}
-                        className="text-xs text-text-tertiary hover:text-red-400 transition-colors disabled:opacity-50"
-                      >
-                        {isConnecting ? <Loader2 size={11} className="animate-spin" /> : 'Disconnect'}
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => handleConnect(app.id)}
-                        disabled={isConnecting || isWaiting}
-                        className="flex items-center rounded-lg bg-flame-500/10 border border-flame-500/20 text-xs text-flame-400 hover:bg-flame-500/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                        style={{ height: '26px', padding: '0 10px', gap: '4px', borderRadius: '8px' }}
-                      >
-                        {isConnecting ? <Loader2 size={11} className="animate-spin" /> : null}
-                        {isConnecting ? 'Opening...' : 'Connect'}
-                      </button>
-                    )}
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      ))}
-
-      {/* Empty state when key not set */}
-      {!composioApiKeySet && catalog.length === 0 && (
-        <div className="rounded-2xl border border-dashed border-border-default text-center" style={{ padding: '48px 24px' }}>
-          <p className="text-text-tertiary text-sm">Enter your Composio API key above to see available integrations</p>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

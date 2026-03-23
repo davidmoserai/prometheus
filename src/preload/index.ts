@@ -130,6 +130,7 @@ const api = {
     setApiKey: (apiKey: string) => ipcRenderer.invoke('composio:setApiKey', apiKey),
     getCatalog: () => ipcRenderer.invoke('composio:getCatalog'),
     listApps: () => ipcRenderer.invoke('composio:listApps'),
+    listActiveIntegrations: () => ipcRenderer.invoke('composio:listActiveIntegrations'),
     authorize: (appId: string) => ipcRenderer.invoke('composio:authorize', appId),
     waitForConnection: (appId: string) => ipcRenderer.invoke('composio:waitForConnection', appId),
     disconnect: (appId: string) => ipcRenderer.invoke('composio:disconnect', appId)

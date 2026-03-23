@@ -83,6 +83,24 @@ export class ComposioManager {
   }
 
   /**
+   * List only the apps the user has actively connected, with name and logo.
+   */
+  async listActiveIntegrations(): Promise<IntegrationDefinition[]> {
+    const session = await this.composio.create(this.userId)
+    const result = await session.toolkits()
+    return result.items
+      .filter(t => t.connection?.isActive === true)
+      .map(t => ({
+        id: t.slug,
+        name: t.name,
+        icon: '🔗',
+        logo: (t as unknown as { meta?: { logo?: string } }).meta?.logo,
+        category: '',
+        description: ''
+      }))
+  }
+
+  /**
    * Disconnect an app by its toolkit slug.
    */
   /**
