@@ -21,17 +21,21 @@ export function IntegrationsSection(): React.JSX.Element {
   const [connectingApp, setConnectingApp] = useState<string | null>(null)
   const [waitingApp, setWaitingApp] = useState<string | null>(null)
 
+  const loadCatalog = useCallback(async (): Promise<void> => {
+    if (window.api?.composio) {
+      const items = await window.api.composio.getCatalog()
+      setCatalog(items || [])
+    }
+  }, [])
+
   // Load catalog and connection status on mount
   useEffect(() => {
     const load = async (): Promise<void> => {
-      if (window.api?.composio) {
-        const items = await window.api.composio.getCatalog()
-        setCatalog(items || [])
-      }
+      await loadCatalog()
       await loadComposioStatus()
     }
     load()
-  }, [loadComposioStatus])
+  }, [loadCatalog, loadComposioStatus])
 
   const handleSaveApiKey = useCallback(async (): Promise<void> => {
     if (!apiKeyInput.trim()) return
@@ -40,6 +44,8 @@ export function IntegrationsSection(): React.JSX.Element {
     try {
       await setComposioApiKey(apiKeyInput.trim())
       setApiKeyInput('')
+      // Reload live catalog now that we have a valid key
+      await loadCatalog()
     } catch {
       setKeyError('Invalid API key — please check and try again')
     } finally {
@@ -104,13 +110,13 @@ export function IntegrationsSection(): React.JSX.Element {
           <p className="text-sm text-text-tertiary" style={{ marginBottom: '16px' }}>
             Integrations are powered by Composio, which securely stores your OAuth tokens so you never have to log in again.{' '}
             <a
-              href="https://composio.dev"
+              href="https://app.composio.dev/settings"
               target="_blank"
               rel="noreferrer"
               className="text-flame-400 hover:text-flame-300 inline-flex items-center transition-colors"
               style={{ gap: '4px' }}
             >
-              Get a free API key <ExternalLink size={12} />
+              Get your API key <ExternalLink size={12} />
             </a>
           </p>
           <div className="flex items-center" style={{ gap: '12px' }}>
@@ -166,7 +172,10 @@ export function IntegrationsSection(): React.JSX.Element {
                 >
                   {/* App header */}
                   <div className="flex items-center" style={{ gap: '10px', marginBottom: '10px' }}>
-                    <span style={{ fontSize: '20px' }}>{app.icon}</span>
+                    {app.logo
+                      ? <img src={app.logo} alt={app.name} style={{ width: '24px', height: '24px', borderRadius: '6px', objectFit: 'contain' }} />
+                      : <span style={{ fontSize: '20px' }}>{app.icon}</span>
+                    }
                     <div>
                       <p className="text-sm font-medium text-text-primary">{app.name}</p>
                       <p className="text-xs text-text-tertiary">{app.description}</p>

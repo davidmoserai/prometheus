@@ -1,6 +1,7 @@
 import { Composio } from '@composio/core'
 import { shell } from 'electron'
 import type { MCPServerConfig } from './types'
+import type { IntegrationDefinition } from './integration-catalog'
 
 export const COMPOSIO_MCP_SERVER_ID = 'composio-integrations'
 
@@ -84,6 +85,25 @@ export class ComposioManager {
   /**
    * Disconnect an app by its toolkit slug.
    */
+  /**
+   * Fetch the full catalog of available integrations from Composio.
+   * Filters out local toolkits and normalizes to IntegrationDefinition shape.
+   */
+  async getCatalog(): Promise<IntegrationDefinition[]> {
+    const toolkits = await this.composio.toolkits.get({})
+    return toolkits
+      .filter(t => !t.isLocalToolkit)
+      .map(t => ({
+        id: t.slug,
+        name: t.name,
+        icon: '🔗',
+        logo: t.meta.logo,
+        category: t.meta.categories?.[0]?.name ?? 'Other',
+        description: t.meta.description ?? ''
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }
+
   async disconnectApp(appId: string): Promise<void> {
     const session = await this.composio.create(this.userId)
     const result = await session.toolkits()
