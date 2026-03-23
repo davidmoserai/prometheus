@@ -73,11 +73,13 @@ export class ComposioManager {
    * Returns map of appId -> connected boolean.
    */
   async listConnectedApps(): Promise<Record<string, boolean>> {
-    const session = await this.composio.create(this.userId)
-    const result = await session.toolkits()
+    const result = await this.composio.connectedAccounts.list({
+      userIds: [this.userId],
+      statuses: ['ACTIVE']
+    })
     const connected: Record<string, boolean> = {}
-    for (const toolkit of result.items) {
-      connected[toolkit.slug] = toolkit.connection?.isActive === true
+    for (const account of result.items) {
+      connected[account.toolkit.slug] = true
     }
     return connected
   }
@@ -86,18 +88,35 @@ export class ComposioManager {
    * List only the apps the user has actively connected, with name and logo.
    */
   async listActiveIntegrations(): Promise<IntegrationDefinition[]> {
-    const session = await this.composio.create(this.userId)
-    const result = await session.toolkits()
-    return result.items
-      .filter(t => t.connection?.isActive === true)
-      .map(t => ({
-        id: t.slug,
-        name: t.name,
-        icon: '🔗',
-        logo: (t as unknown as { meta?: { logo?: string } }).meta?.logo,
-        category: '',
-        description: ''
-      }))
+    const result = await this.composio.connectedAccounts.list({
+      userIds: [this.userId],
+      statuses: ['ACTIVE']
+    })
+
+    if (result.items.length === 0) return []
+
+    // Fetch toolkit metadata (name + logo) for each connected app
+    const slugs = [...new Set(result.items.map(a => a.toolkit.slug))]
+    const toolkitMeta: Record<string, { name: string; logo?: string }> = {}
+    await Promise.allSettled(
+      slugs.map(async slug => {
+        try {
+          const tk = await this.composio.toolkits.get(slug)
+          toolkitMeta[slug] = { name: (tk as unknown as { name: string }).name ?? slug, logo: (tk as unknown as { meta?: { logo?: string } }).meta?.logo }
+        } catch {
+          toolkitMeta[slug] = { name: slug }
+        }
+      })
+    )
+
+    return slugs.map(slug => ({
+      id: slug,
+      name: toolkitMeta[slug]?.name ?? slug,
+      icon: '🔗',
+      logo: toolkitMeta[slug]?.logo,
+      category: '',
+      description: ''
+    }))
   }
 
   /**
@@ -123,12 +142,12 @@ export class ComposioManager {
   }
 
   async disconnectApp(appId: string): Promise<void> {
-    const session = await this.composio.create(this.userId)
-    const result = await session.toolkits()
-    const toolkit = result.items.find(t => t.slug === appId)
-    const connectedAccountId = toolkit?.connection?.connectedAccount?.id
-    if (!connectedAccountId) return
-
-    await this.composio.connectedAccounts.delete(connectedAccountId)
+    const result = await this.composio.connectedAccounts.list({
+      userIds: [this.userId],
+      toolkitSlugs: [appId]
+    })
+    const account = result.items[0]
+    if (!account) return
+    await this.composio.connectedAccounts.delete(account.id)
   }
 }
