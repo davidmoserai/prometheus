@@ -1375,7 +1375,6 @@ export class AgentManager {
 
     // Get enabled MCP tool assignments for this employee
     const mcpAssignments = employee.tools.filter(t => t.source === 'mcp' && t.enabled && t.mcpServerId)
-
     // Group by server ID
     const byServer = new Map<string, string[]>()
     for (const assignment of mcpAssignments) {
