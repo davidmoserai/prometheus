@@ -316,13 +316,31 @@ export const DEFAULT_SETTINGS: AppSettings = {
   mcpServers: [...DEFAULT_MCP_SERVERS]
 }
 
+// Single source of truth for builtin tool IDs (matches Mastra tool keys)
+export const TOOL_IDS = {
+  WEB_SEARCH: 'web_search',
+  WEB_BROWSE: 'web_browse',
+  READ_FILE: 'read_file',
+  WRITE_FILE: 'write_file',
+  EXECUTE_CODE: 'execute_code'
+} as const
+
 export const AVAILABLE_TOOLS: ToolAssignment[] = [
-  { id: 'web-search', name: 'Web Search', source: 'builtin', enabled: false, requiresApproval: false },
-  { id: 'web-browse', name: 'Web Browse', source: 'builtin', enabled: false, requiresApproval: false },
-  { id: 'file-read', name: 'Read Files', source: 'builtin', enabled: false, requiresApproval: false },
-  { id: 'file-write', name: 'Write Files', source: 'builtin', enabled: false, requiresApproval: true },
-  { id: 'code-execute', name: 'Execute Code', source: 'builtin', enabled: false, requiresApproval: true }
+  { id: TOOL_IDS.WEB_SEARCH, name: 'Web Search', source: 'builtin', enabled: false, requiresApproval: false },
+  { id: TOOL_IDS.WEB_BROWSE, name: 'Web Browse', source: 'builtin', enabled: false, requiresApproval: false },
+  { id: TOOL_IDS.READ_FILE, name: 'Read Files', source: 'builtin', enabled: false, requiresApproval: false },
+  { id: TOOL_IDS.WRITE_FILE, name: 'Write Files', source: 'builtin', enabled: false, requiresApproval: true },
+  { id: TOOL_IDS.EXECUTE_CODE, name: 'Execute Code', source: 'builtin', enabled: false, requiresApproval: true }
 ]
+
+// Migration map for old tool IDs → new
+export const LEGACY_TOOL_ID_MAP: Record<string, string> = {
+  'web-search': TOOL_IDS.WEB_SEARCH,
+  'web-browse': TOOL_IDS.WEB_BROWSE,
+  'file-read': TOOL_IDS.READ_FILE,
+  'file-write': TOOL_IDS.WRITE_FILE,
+  'code-execute': TOOL_IDS.EXECUTE_CODE
+}
 
 export type StreamPart =
   | { type: 'text'; content: string }

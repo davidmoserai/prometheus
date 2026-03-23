@@ -6,7 +6,7 @@ import { Agent } from '@mastra/core/agent'
 import { createTool } from '@mastra/core/tools'
 import { z } from 'zod'
 import { EmployeeStore } from './store'
-import { ChatMessage, Employee, ProviderConfig, Task, TaskMessage } from './types'
+import { ChatMessage, Employee, ProviderConfig, Task, TaskMessage, TOOL_IDS } from './types'
 import type { MCPManager } from './mcp-manager'
 import { runClaudeCode } from './claude-code-runner'
 
@@ -208,8 +208,8 @@ function buildMastraTools(
   })
 
   // Builtin tools based on employee configuration
-  if (enabledToolIds.has('web-search')) {
-    tools.web_search = createTool({
+  if (enabledToolIds.has(TOOL_IDS.WEB_SEARCH)) {
+    tools[TOOL_IDS.WEB_SEARCH] = createTool({
       id: 'web_search',
       description: 'Search the web for information',
       inputSchema: z.object({
@@ -230,8 +230,8 @@ function buildMastraTools(
     })
   }
 
-  if (enabledToolIds.has('web-browse')) {
-    tools.web_browse = createTool({
+  if (enabledToolIds.has(TOOL_IDS.WEB_BROWSE)) {
+    tools[TOOL_IDS.WEB_BROWSE] = createTool({
       id: 'web_browse',
       description: 'Visit a URL and read its content',
       inputSchema: z.object({
@@ -252,8 +252,8 @@ function buildMastraTools(
     })
   }
 
-  if (enabledToolIds.has('file-read')) {
-    tools.read_file = createTool({
+  if (enabledToolIds.has(TOOL_IDS.READ_FILE)) {
+    tools[TOOL_IDS.READ_FILE] = createTool({
       id: 'read_file',
       description: 'Read a file from the local filesystem',
       inputSchema: z.object({
@@ -270,8 +270,8 @@ function buildMastraTools(
     })
   }
 
-  if (enabledToolIds.has('file-write')) {
-    tools.write_file = createTool({
+  if (enabledToolIds.has(TOOL_IDS.WRITE_FILE)) {
+    tools[TOOL_IDS.WRITE_FILE] = createTool({
       id: 'write_file',
       description: 'Write content to a file',
       inputSchema: z.object({
@@ -292,8 +292,8 @@ function buildMastraTools(
     })
   }
 
-  if (enabledToolIds.has('code-execute')) {
-    tools.execute_code = createTool({
+  if (enabledToolIds.has(TOOL_IDS.EXECUTE_CODE)) {
+    tools[TOOL_IDS.EXECUTE_CODE] = createTool({
       id: 'execute_code',
       description: 'Execute code locally. Supports python and javascript/node. Code runs with a 30 second timeout. Output (stdout + stderr) is returned.',
       inputSchema: z.object({
@@ -1195,20 +1195,11 @@ export class AgentManager {
   }
 
   /**
-   * Match a tool key (e.g. 'web_search', 'mcp_server_tool') to the employee's ToolAssignment.
-   * Handles the hyphen/underscore mismatch between assignment IDs and tool keys.
+   * Match a tool key to the employee's ToolAssignment.
+   * IDs match directly since both use TOOL_IDS constants.
    */
   private findToolAssignment(employee: Employee, toolKey: string): { name: string; requiresApproval: boolean } | undefined {
-    // Direct match
-    let assignment = employee.tools.find(t => t.id === toolKey && t.enabled)
-    if (assignment) return assignment
-
-    // Builtin tools: assignment uses hyphens (web-search), tool key uses underscores (web_search)
-    const hyphenated = toolKey.replace(/_/g, '-')
-    assignment = employee.tools.find(t => t.id === hyphenated && t.enabled)
-    if (assignment) return assignment
-
-    return undefined
+    return employee.tools.find(t => t.id === toolKey && t.enabled)
   }
 
   /**

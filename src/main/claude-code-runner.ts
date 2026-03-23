@@ -239,18 +239,26 @@ export function runClaudeCode(options: RunOptions): { promise: Promise<string>; 
       '--dangerously-skip-permissions'
     ]
 
-    // Map and set available tools
+    // Map employee's enabled tools to Claude Code built-in tool names
+    // Only these tools will be available — everything else is blocked
     const ccTools = mapToolsForCLI(enabledToolIds)
     if (ccTools.length > 0) {
       args.push('--tools', ccTools.join(','))
     } else {
-      // No tools — empty string disables all
+      // No tools — empty string disables all built-in tools
       args.push('--tools', '')
     }
 
-    // MCP servers
+    // Block user's personal MCP servers — only use what we explicitly provide
+    args.push('--strict-mcp-config')
+
+    // MCP servers (only employee's assigned ones)
     if (mcpServers && mcpServers.length > 0) {
       tempMcpPath = writeTempMcpConfig(mcpServers)
+      args.push('--mcp-config', tempMcpPath)
+    } else {
+      // Even with no MCP servers, we need --mcp-config for --strict-mcp-config to work
+      tempMcpPath = writeTempMcpConfig([])
       args.push('--mcp-config', tempMcpPath)
     }
 

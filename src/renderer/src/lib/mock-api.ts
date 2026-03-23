@@ -445,7 +445,9 @@ export function installMockApi() {
       },
       onStream: () => () => {},
       onFileWritten: () => () => {},
-      onToolCall: () => () => {}
+      onToolCall: () => () => {},
+      respondApproval: async () => {},
+      onApprovalRequest: () => () => {}
     },
     recurringTasks: {
       list: async () => getActive().recurringTasks || [],
