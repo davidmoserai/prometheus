@@ -125,6 +125,15 @@ const api = {
     getTools: (serverId: string) => ipcRenderer.invoke('mcp:getTools', serverId),
     testConnection: (config: unknown) => ipcRenderer.invoke('mcp:testConnection', config)
   },
+  composio: {
+    hasApiKey: () => ipcRenderer.invoke('composio:hasApiKey'),
+    setApiKey: (apiKey: string) => ipcRenderer.invoke('composio:setApiKey', apiKey),
+    getCatalog: () => ipcRenderer.invoke('composio:getCatalog'),
+    listApps: () => ipcRenderer.invoke('composio:listApps'),
+    authorize: (appId: string) => ipcRenderer.invoke('composio:authorize', appId),
+    waitForConnection: (appId: string) => ipcRenderer.invoke('composio:waitForConnection', appId),
+    disconnect: (appId: string) => ipcRenderer.invoke('composio:disconnect', appId)
+  },
   updates: {
     onAvailable: (callback: () => void) => {
       const handler = () => callback()

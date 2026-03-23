@@ -117,31 +117,55 @@ export class MCPManager {
     // Disconnect existing client if reconnecting
     await this.disconnect(config.id)
 
-    // Resolve command (fixes broken shebangs in npm packages)
-    const resolved = this.resolveCommand(config)
+    let client: MCPClient
 
-    const client = new MCPClient({
-      id: `prometheus-mcp-${config.id}`,
-      servers: {
-        [config.id]: {
-          command: resolved.command,
-          args: resolved.args,
-          env: mcpEnv(config.env),
-          stderr: 'pipe' as const
+    if (config.transport === 'http' && config.url) {
+      // HTTP/SSE transport (used for Composio and other remote MCP servers)
+      const extraHeaders = config.headers ?? {}
+      client = new MCPClient({
+        id: `prometheus-mcp-${config.id}`,
+        servers: {
+          [config.id]: {
+            url: new URL(config.url),
+            // Inject auth headers via custom fetch for both Streamable HTTP and SSE transports
+            fetch: async (url, init) => {
+              return globalThis.fetch(url as string, {
+                ...init,
+                headers: { ...(init?.headers as Record<string, string> ?? {}), ...extraHeaders }
+              })
+            }
+          }
         }
-      }
-    })
+      })
+    } else {
+      // Stdio transport (local subprocess)
+      const resolved = this.resolveCommand(config)
+      client = new MCPClient({
+        id: `prometheus-mcp-${config.id}`,
+        servers: {
+          [config.id]: {
+            command: resolved.command,
+            args: resolved.args,
+            env: mcpEnv(config.env),
+            stderr: 'pipe' as const
+          }
+        }
+      })
+      // Watch stderr for OAuth URLs and open them in the system browser
+      watchStderrForUrls(client, config.id)
+    }
 
     this.clients.set(config.id, client)
 
-    // Watch stderr for OAuth URLs and open them in the system browser
-    watchStderrForUrls(client, config.id)
-
     // Discover tools with a timeout (longer for servers that need auth + gateway startup)
-    const timeoutMs = 90000
+    const timeoutMs = config.transport === 'http' ? 30000 : 90000
     const toolsetPromise = client.listToolsets()
     const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error(`Connection timed out after ${timeoutMs / 1000}s — the server may need browser auth. Try running it manually first: ${config.command} ${config.args.join(' ')}`)), timeoutMs)
+      setTimeout(() => reject(new Error(
+        config.transport === 'http'
+          ? `Connection timed out after ${timeoutMs / 1000}s — check your Composio API key and internet connection`
+          : `Connection timed out after ${timeoutMs / 1000}s — the server may need browser auth. Try running it manually first: ${config.command} ${config.args.join(' ')}`
+      )), timeoutMs)
     )
 
     const toolsets = await Promise.race([toolsetPromise, timeoutPromise])

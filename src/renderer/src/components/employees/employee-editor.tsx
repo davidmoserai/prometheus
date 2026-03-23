@@ -8,6 +8,7 @@ import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
 import { ContactAccessEditor } from './contact-access-editor'
 import { useAppStore, type Employee, type ToolAssignment, type PermissionSet, type ContactAccess } from '@/stores/app-store'
+import { INTEGRATION_CATALOG_BY_ID } from '../../../../main/integration-catalog'
 
 const AVATARS = ['🔥', '⚡', '🧠', '🎯', '🚀', '💡', '🔮', '⭐', '🛡️', '🎨', '📊', '🔬', '📝', '🤖', '🦾', '🧬']
 
@@ -830,7 +831,7 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
                       )
                     })()}
 
-                    {/* MCP Server Tool Sections */}
+                    {/* Integration + Custom MCP Tool Sections */}
                     {mcpServers.filter(s => s.enabled).map((server) => {
                       const serverToolNames = mcpToolNames[server.id] || []
                       if (serverToolNames.length === 0) return null
@@ -891,7 +892,9 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
                                 ? <ChevronRight className="w-4 h-4 text-text-tertiary" />
                                 : <ChevronDown className="w-4 h-4 text-text-tertiary" />
                               }
-                              <span className="text-[13px] font-semibold text-text-primary">MCP: {server.name}</span>
+                              <span className="text-[13px] font-semibold text-text-primary">
+                                {server.isComposio ? '🔗 Integrations' : server.name}
+                              </span>
                             </div>
                             <div className="flex items-center" style={{ gap: '10px' }}>
                               <Badge variant="secondary">{enabledCount}/{mcpToolAssignments.length} enabled</Badge>

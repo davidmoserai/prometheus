@@ -4,6 +4,8 @@ import { join } from 'path'
 import { EmployeeStore } from './store'
 import { AgentManager } from './agent-manager'
 import { MCPManager } from './mcp-manager'
+import { ComposioManager, COMPOSIO_MCP_SERVER_ID } from './composio-manager'
+import { INTEGRATION_CATALOG } from './integration-catalog'
 import { Scheduler } from './scheduler'
 import type { MCPServerConfig } from './types'
 import { isClaudeCodeInstalled, getAuthStatus, launchLogin } from './claude-code-runner'
@@ -11,6 +13,7 @@ import { isClaudeCodeInstalled, getAuthStatus, launchLogin } from './claude-code
 let mainWindow: BrowserWindow | null = null
 let store: EmployeeStore
 let mcpManager: MCPManager
+let composioManager: ComposioManager | null = null
 let agentManager: AgentManager
 let scheduler: Scheduler
 
@@ -219,6 +222,67 @@ function registerIpcHandlers(): void {
     }
   })
 
+  // Composio Integrations IPC Handlers
+  ipcMain.handle('composio:hasApiKey', () => {
+    return !!store.getComposioApiKey()
+  })
+
+  ipcMain.handle('composio:setApiKey', async (_event, apiKey: string) => {
+    store.setComposioApiKey(apiKey)
+    await initComposio()
+    return { success: true }
+  })
+
+  ipcMain.handle('composio:getCatalog', () => {
+    return INTEGRATION_CATALOG
+  })
+
+  ipcMain.handle('composio:listApps', async () => {
+    if (!composioManager) return {}
+    try {
+      return await composioManager.listConnectedApps()
+    } catch (err) {
+      console.error('Failed to list Composio apps:', err)
+      return {}
+    }
+  })
+
+  ipcMain.handle('composio:authorize', async (_event, appId: string) => {
+    if (!composioManager) return { success: false, error: 'Composio not configured' }
+    try {
+      const { redirectUrl } = await composioManager.authorizeApp(appId)
+      return { success: true, redirectUrl }
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Authorization failed' }
+    }
+  })
+
+  ipcMain.handle('composio:waitForConnection', async (_event, appId: string) => {
+    if (!composioManager) return { success: false }
+    try {
+      const { waitForConnection } = await composioManager.authorizeApp(appId)
+      const connected = await waitForConnection(120000)
+      if (connected) {
+        // Refresh the Composio MCP connection to pick up the new tool
+        await reconnectComposioMcp()
+      }
+      return { success: connected }
+    } catch {
+      return { success: false }
+    }
+  })
+
+  ipcMain.handle('composio:disconnect', async (_event, appId: string) => {
+    if (!composioManager) return { success: false }
+    try {
+      await composioManager.disconnectApp(appId)
+      await reconnectComposioMcp()
+      return { success: true }
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Disconnect failed' }
+    }
+  })
+
   // Claude Code IPC Handlers
   ipcMain.handle('claude-code:isInstalled', () => {
     return isClaudeCodeInstalled()
@@ -238,6 +302,37 @@ function registerIpcHandlers(): void {
   })
 }
 
+// Initialize or reinitialize Composio and connect its MCP session
+async function initComposio(): Promise<void> {
+  const apiKey = store.getComposioApiKey()
+  if (!apiKey) return
+
+  const activeCompanyId = store.getActiveCompanyId()
+  const userId = activeCompanyId ?? 'default'
+
+  composioManager = new ComposioManager(apiKey, userId)
+  await reconnectComposioMcp()
+}
+
+// Refresh the Composio HTTP MCP connection
+async function reconnectComposioMcp(): Promise<void> {
+  if (!composioManager) return
+  try {
+    const mcpConfig = await composioManager.getMcpConfig()
+
+    // Update or add the Composio MCP server config in settings
+    const settings = store.getSettings()
+    const servers = (settings.mcpServers || []).filter(s => s.id !== COMPOSIO_MCP_SERVER_ID)
+    store.updateSettings({ mcpServers: [...servers, mcpConfig] })
+
+    // Connect via MCPManager (HTTP transport)
+    await mcpManager.connect(mcpConfig)
+    console.log('Composio MCP connected')
+  } catch (err) {
+    console.error('Failed to connect Composio MCP:', err)
+  }
+}
+
 app.whenReady().then(() => {
   // Initialize store after app is ready (needs app.getPath)
   store = new EmployeeStore()
@@ -246,11 +341,17 @@ app.whenReady().then(() => {
 
   // Connect to configured MCP servers on startup
   const settings = store.getSettings()
-  if (settings.mcpServers?.length > 0) {
-    mcpManager.connectAll(settings.mcpServers).catch(err => {
+  const customServers = (settings.mcpServers || []).filter(s => !s.isComposio)
+  if (customServers.length > 0) {
+    mcpManager.connectAll(customServers).catch(err => {
       console.error('Failed to connect MCP servers on startup:', err)
     })
   }
+
+  // Connect Composio if API key is configured
+  initComposio().catch(err => {
+    console.error('Failed to initialize Composio on startup:', err)
+  })
 
   // Push task updates to frontend in real-time
   agentManager.setTaskUpdateCallback((task) => {

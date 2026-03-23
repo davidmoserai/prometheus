@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Key, Save, Eye, EyeOff, Check, AlertCircle, Plus, Trash2, Server, Loader2, Wrench, Terminal, LogIn, CheckCircle2, ExternalLink } from 'lucide-react'
+import { Key, Save, Eye, EyeOff, Check, AlertCircle, Plus, Trash2, Server, Loader2, Wrench, Terminal, LogIn, CheckCircle2, ExternalLink, Puzzle } from 'lucide-react'
+import { IntegrationsSection } from './integrations-section'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -469,12 +470,24 @@ export function SettingsPage() {
             )
           })}
         </div>
-        {/* MCP Servers Section */}
-        <div className="flex flex-col" style={{ gap: '12px', marginTop: '48px' }}>
+        {/* Integrations Section */}
+        <div style={{ marginTop: '56px', marginBottom: '56px' }}>
+          <div className="flex items-center" style={{ gap: '10px', marginBottom: '32px' }}>
+            <Puzzle className="w-4 h-4 text-flame-400 drop-shadow-[0_0_6px_rgba(249,115,22,0.4)]" />
+            <h3 className="text-[16px] font-semibold text-text-primary tracking-tight">Integrations</h3>
+          </div>
+          <IntegrationsSection />
+        </div>
+
+        {/* Custom Integrations (Advanced) Section */}
+        <div className="flex flex-col" style={{ gap: '12px', marginTop: '0' }}>
           <div className="flex items-center justify-between" style={{ marginBottom: '20px' }}>
             <div className="flex items-center" style={{ gap: '10px' }}>
               <Server className="w-4 h-4 text-flame-400 drop-shadow-[0_0_6px_rgba(249,115,22,0.4)]" />
-              <h3 className="text-[16px] font-semibold text-text-primary tracking-tight">MCP Servers</h3>
+              <div>
+                <h3 className="text-[16px] font-semibold text-text-primary tracking-tight">Custom Integrations</h3>
+                <p className="text-xs text-text-tertiary" style={{ marginTop: '2px' }}>Advanced: add your own MCP servers</p>
+              </div>
             </div>
             <Button variant="secondary" size="sm" onClick={() => setShowMcpForm(!showMcpForm)}>
               <Plus className="w-3.5 h-3.5" />

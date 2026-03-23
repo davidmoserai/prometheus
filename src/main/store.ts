@@ -582,6 +582,16 @@ export class EmployeeStore {
     return this.data.settings
   }
 
+  // Composio API key (stored in settings, never exposed to renderer)
+  getComposioApiKey(): string | undefined {
+    return this.data.settings.composioApiKey
+  }
+
+  setComposioApiKey(key: string): void {
+    this.data.settings = { ...this.data.settings, composioApiKey: key }
+    this.save()
+  }
+
   // Tasks (scoped to active company)
   listTasks(): Task[] {
     return this.getActiveData().tasks || []

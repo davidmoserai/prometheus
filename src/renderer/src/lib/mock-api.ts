@@ -492,6 +492,15 @@ export function installMockApi() {
     settings: {
       get: async () => settings,
       update: async (s: Partial<typeof settings>) => { settings = { ...settings, ...s }; return settings }
+    },
+    composio: {
+      hasApiKey: async () => false,
+      setApiKey: async (_apiKey: string) => ({ success: true }),
+      getCatalog: async () => [],
+      listApps: async () => ({}),
+      authorize: async (_appId: string) => ({ success: false, error: 'Not available in web preview' }),
+      waitForConnection: async (_appId: string) => ({ success: false }),
+      disconnect: async (_appId: string) => ({ success: true })
     }
   }
 
