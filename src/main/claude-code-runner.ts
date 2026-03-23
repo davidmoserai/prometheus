@@ -45,9 +45,21 @@ function cleanEnv(): NodeJS.ProcessEnv {
   return env
 }
 
+// Cache resolved claude binary path
+let _claudeBinPath: string | null = null
+function getClaudeBin(): string {
+  if (_claudeBinPath) return _claudeBinPath
+  try {
+    _claudeBinPath = execSync('which claude', { encoding: 'utf-8', env: cleanEnv(), timeout: 5000, stdio: 'pipe' }).trim()
+  } catch {
+    _claudeBinPath = 'claude'
+  }
+  return _claudeBinPath
+}
+
 export function isClaudeCodeInstalled(): boolean {
   try {
-    execSync('claude --version', { encoding: 'utf-8', timeout: 5000, stdio: 'pipe', env: cleanEnv() })
+    execSync(`${getClaudeBin()} --version`, { encoding: 'utf-8', timeout: 5000, stdio: 'pipe', env: cleanEnv() })
     return true
   } catch {
     return false
@@ -59,7 +71,7 @@ export function isClaudeCodeInstalled(): boolean {
  */
 export function getAuthStatus(): ClaudeAuthStatus {
   try {
-    const output = execSync('claude auth status --text', {
+    const output = execSync(`${getClaudeBin()} auth status --text`, {
       encoding: 'utf-8',
       timeout: 10000,
       stdio: 'pipe',
@@ -91,7 +103,7 @@ export function getAuthStatus(): ClaudeAuthStatus {
  */
 export function launchLogin(): Promise<ClaudeAuthStatus> {
   return new Promise((resolve) => {
-    const child = spawn('claude', ['auth', 'login'], {
+    const child = spawn(getClaudeBin(), ['auth', 'login'], {
       stdio: 'inherit',
       shell: true,
       env: cleanEnv()
@@ -242,16 +254,15 @@ export function runClaudeCode(options: RunOptions): { promise: Promise<string>; 
     }
     fullPrompt += prompt
 
-    // Pass prompt as positional arg
-    args.push(fullPrompt)
-
-    // Spawn the process (cleanEnv strips ELECTRON_RUN_AS_NODE)
-    child = spawn('claude', args, {
+    // Spawn the process — pipe prompt via stdin (more reliable than positional arg from Electron)
+    child = spawn(getClaudeBin(), args, {
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: cleanEnv()
+      env: cleanEnv(),
+      shell: false
     })
 
-    // Close stdin immediately so Claude doesn't wait for piped input
+    // Write prompt to stdin and close it
+    child.stdin?.write(fullPrompt)
     child.stdin?.end()
 
     let accumulated = ''
