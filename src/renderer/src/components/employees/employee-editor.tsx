@@ -893,7 +893,26 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
                               }
                               <span className="text-[13px] font-semibold text-text-primary">MCP: {server.name}</span>
                             </div>
-                            <Badge variant="secondary">{enabledCount}/{mcpToolAssignments.length} enabled</Badge>
+                            <div className="flex items-center" style={{ gap: '10px' }}>
+                              <Badge variant="secondary">{enabledCount}/{mcpToolAssignments.length} enabled</Badge>
+                              <div onClick={(e) => e.stopPropagation()}>
+                                <Switch
+                                  checked={enabledCount === mcpToolAssignments.length && mcpToolAssignments.length > 0}
+                                  onCheckedChange={(checked) => {
+                                    const updatedTools = [...tools]
+                                    for (const mTool of mcpToolAssignments) {
+                                      const idx = updatedTools.findIndex(t => t.id === mTool.id)
+                                      if (idx >= 0) {
+                                        updatedTools[idx] = { ...updatedTools[idx], enabled: checked }
+                                      } else if (checked) {
+                                        updatedTools.push({ ...mTool, enabled: true })
+                                      }
+                                    }
+                                    setTools(updatedTools)
+                                  }}
+                                />
+                              </div>
+                            </div>
                           </button>
 
                           {/* Tool list */}

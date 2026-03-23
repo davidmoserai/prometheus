@@ -3,6 +3,7 @@ import { Send, Plus, MessageSquare, ChevronLeft, ChevronDown, Users, ArrowRight,
 import ReactMarkdown from 'react-markdown'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useAppStore, type Conversation, type ChatMessage, type ChatAttachment, type StreamPart } from '@/stores/app-store'
 
 export function ChatPage() {
@@ -33,6 +34,7 @@ export function ChatPage() {
   const messagesContainerRef = useRef<HTMLDivElement>(null)
   const [stagedAttachments, setStagedAttachments] = useState<ChatAttachment[]>([])
   const [expandedToolCalls, setExpandedToolCalls] = useState<Set<string>>(new Set())
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const dropZoneRef = useRef<HTMLDivElement>(null)
@@ -345,7 +347,7 @@ export function ChatPage() {
                   <Badge variant="secondary" className="text-[9px] shrink-0">Agent</Badge>
                 )}
                 <button
-                  onClick={(e) => { e.stopPropagation(); deleteConversation(conv.id) }}
+                  onClick={(e) => { e.stopPropagation(); setDeleteConfirmId(conv.id) }}
                   className="opacity-0 group-hover/conv:opacity-100 text-text-tertiary hover:text-ember-400 transition-all cursor-pointer shrink-0"
                   style={{ padding: '2px' }}
                 >
@@ -621,6 +623,19 @@ export function ChatPage() {
           </div>
         )}
       </div>
+
+      <ConfirmDialog
+        open={!!deleteConfirmId}
+        title="Delete conversation?"
+        description="This will permanently delete this conversation and all its messages. This cannot be undone."
+        confirmLabel="Delete"
+        variant="destructive"
+        onConfirm={() => {
+          if (deleteConfirmId) deleteConversation(deleteConfirmId)
+          setDeleteConfirmId(null)
+        }}
+        onCancel={() => setDeleteConfirmId(null)}
+      />
     </div>
   )
 }

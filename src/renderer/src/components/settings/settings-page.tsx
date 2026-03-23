@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Key, Save, Eye, EyeOff, Check, AlertCircle, Plus, Trash2, Server, Loader2, Wrench, Terminal, LogIn, CheckCircle2 } from 'lucide-react'
+import { Key, Save, Eye, EyeOff, Check, AlertCircle, Plus, Trash2, Server, Loader2, Wrench, Terminal, LogIn, CheckCircle2, ExternalLink } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -113,6 +113,7 @@ export function SettingsPage() {
   const [mcpCommand, setMcpCommand] = useState('')
   const [mcpArgs, setMcpArgs] = useState('')
   const [mcpEnv, setMcpEnv] = useState('')
+  const [mcpGithubUrl, setMcpGithubUrl] = useState('')
   const [mcpConnecting, setMcpConnecting] = useState(false)
   const [mcpError, setMcpError] = useState<string | null>(null)
   const [showEnvValues, setShowEnvValues] = useState<Record<string, boolean>>({})
@@ -165,6 +166,7 @@ export function SettingsPage() {
       command: mcpCommand.trim(),
       args,
       env: Object.keys(env).length > 0 ? env : undefined,
+      githubUrl: mcpGithubUrl.trim() || undefined,
       enabled: true
     }
 
@@ -529,6 +531,15 @@ export function SettingsPage() {
                     />
                   </div>
 
+                  <div>
+                    <label className="block text-[13px] font-medium text-text-secondary" style={{ marginBottom: '8px' }}>GitHub Repository (optional)</label>
+                    <Input
+                      placeholder="e.g. https://github.com/user/repo"
+                      value={mcpGithubUrl}
+                      onChange={(e) => setMcpGithubUrl(e.target.value)}
+                    />
+                  </div>
+
                   {mcpError && (
                     <div className="flex items-center rounded-xl bg-red-500/[0.06] border border-red-500/15" style={{ gap: '8px', padding: '12px 16px' }}>
                       <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
@@ -591,9 +602,22 @@ export function SettingsPage() {
                           </Badge>
                         )}
                       </div>
-                      <p className="text-[12px] text-text-tertiary mt-0.5 font-mono">
-                        {server.command} {server.args.join(' ')}
-                      </p>
+                      <div className="flex items-center mt-0.5" style={{ gap: '8px' }}>
+                        <p className="text-[12px] text-text-tertiary font-mono">
+                          {server.command} {server.args.join(' ')}
+                        </p>
+                        {server.githubUrl && (
+                          <a
+                            href={server.githubUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-text-tertiary hover:text-flame-400 transition-colors"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <ExternalLink className="w-3 h-3" />
+                          </a>
+                        )}
+                      </div>
                     </div>
                   </div>
 
@@ -602,13 +626,15 @@ export function SettingsPage() {
                       checked={server.enabled}
                       onCheckedChange={(checked) => handleToggleMcpServer(server.id, checked)}
                     />
-                    <button
-                      onClick={() => handleRemoveMcpServer(server.id)}
-                      className="text-text-tertiary hover:text-red-400 transition-colors cursor-pointer"
-                      style={{ padding: '4px' }}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    {!server.isDefault && (
+                      <button
+                        onClick={() => handleRemoveMcpServer(server.id)}
+                        className="text-text-tertiary hover:text-red-400 transition-colors cursor-pointer"
+                        style={{ padding: '4px' }}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
                   </div>
                 </div>
 

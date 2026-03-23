@@ -55,7 +55,21 @@ export interface MCPServerConfig {
   args: string[]
   env?: Record<string, string>
   enabled: boolean
+  githubUrl?: string
+  isDefault?: boolean
 }
+
+export const DEFAULT_MCP_SERVERS: MCPServerConfig[] = [
+  {
+    id: 'yfnhanced-yahoo-finance',
+    name: 'Yahoo Finance',
+    command: 'npx',
+    args: ['-y', 'yfnhanced-mcp'],
+    enabled: false,
+    githubUrl: 'https://github.com/kanishka-namdeo/yfnhanced-mcp',
+    isDefault: true
+  }
+]
 
 export interface PermissionSet {
   canBrowseWeb: boolean
@@ -299,7 +313,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   defaultProvider: 'openai',
   defaultModel: 'gpt-4o',
   theme: 'dark',
-  mcpServers: []
+  mcpServers: [...DEFAULT_MCP_SERVERS]
 }
 
 export const AVAILABLE_TOOLS: ToolAssignment[] = [

@@ -15,7 +15,8 @@ import {
   RecurringTask,
   AppSettings,
   DEFAULT_SETTINGS,
-  DEFAULT_PROVIDERS
+  DEFAULT_PROVIDERS,
+  DEFAULT_MCP_SERVERS
 } from './types'
 
 interface CompanyData {
@@ -550,8 +551,17 @@ export class EmployeeStore {
         }
         return defaultProv
       }),
-      // Ensure mcpServers is always present (backward compatibility)
-      mcpServers: saved.mcpServers || []
+      // Merge default MCP servers (add missing defaults, preserve user's enabled state)
+      mcpServers: [
+        ...DEFAULT_MCP_SERVERS.map(defaultMcp => {
+          const savedMcp = (saved.mcpServers || []).find(s => s.id === defaultMcp.id)
+          if (savedMcp) {
+            return { ...defaultMcp, enabled: savedMcp.enabled, env: savedMcp.env }
+          }
+          return defaultMcp
+        }),
+        ...(saved.mcpServers || []).filter(s => !DEFAULT_MCP_SERVERS.find(d => d.id === s.id))
+      ]
     }
     return merged
   }

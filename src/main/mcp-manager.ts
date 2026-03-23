@@ -1,6 +1,7 @@
 import { MCPClient } from '@mastra/mcp'
 import { shell } from 'electron'
 import { execSync } from 'child_process'
+import { readFileSync } from 'fs'
 import type { Tool } from '@mastra/core/tools'
 import type { MCPServerConfig } from './types'
 
@@ -70,16 +71,61 @@ export class MCPManager {
    * Pipes stderr and watches for OAuth URLs to open in the system browser.
    * Returns the list of discovered tool names.
    */
+  /**
+   * Resolve command for MCP servers that use npx with broken shebangs.
+   * If the installed binary is a JS file without a node shebang, run it with node directly.
+   */
+  private resolveCommand(config: MCPServerConfig): { command: string; args: string[] } {
+    if (config.command === 'npx') {
+      try {
+        const env = mcpEnv(config.env)
+        // Get the package name (skip flags like -y)
+        const pkgName = config.args.find(a => !a.startsWith('-'))
+        if (pkgName) {
+          // Resolve which binary the package provides by checking npm bin
+          const binPath = execSync(
+            `npm ls -g --parseable ${pkgName} 2>/dev/null | head -1`,
+            { env, encoding: 'utf-8', timeout: 10000 }
+          ).trim()
+
+          if (binPath) {
+            // Find the binary from the package's bin field
+            const pkgJsonPath = `${binPath}/package.json`
+            const pkgJson = JSON.parse(readFileSync(pkgJsonPath, 'utf-8'))
+            const binEntries = typeof pkgJson.bin === 'string'
+              ? { [pkgJson.name]: pkgJson.bin }
+              : pkgJson.bin || {}
+            const binFile = Object.values(binEntries)[0] as string
+            if (binFile) {
+              const fullBinPath = `${binPath}/${binFile}`
+              const head = readFileSync(fullBinPath, 'utf-8').slice(0, 100)
+              if (!head.startsWith('#!') && /^(import |require\(|const |"use strict")/.test(head)) {
+                console.log(`MCP "${config.name}": binary missing shebang, using node directly`)
+                return { command: 'node', args: [fullBinPath] }
+              }
+            }
+          }
+        }
+      } catch {
+        // Fall through to default
+      }
+    }
+    return { command: config.command, args: config.args }
+  }
+
   async connect(config: MCPServerConfig): Promise<string[]> {
     // Disconnect existing client if reconnecting
     await this.disconnect(config.id)
+
+    // Resolve command (fixes broken shebangs in npm packages)
+    const resolved = this.resolveCommand(config)
 
     const client = new MCPClient({
       id: `prometheus-mcp-${config.id}`,
       servers: {
         [config.id]: {
-          command: config.command,
-          args: config.args,
+          command: resolved.command,
+          args: resolved.args,
           env: mcpEnv(config.env),
           stderr: 'pipe' as const
         }

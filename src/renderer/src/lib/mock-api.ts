@@ -256,7 +256,9 @@ const defaultProviders = [
   { id: 'ollama', name: 'Ollama (Local)', apiKey: '', baseUrl: 'http://localhost:11434', models: ['llama3', 'mistral', 'codellama'], enabled: false }
 ]
 
-let settings = { providers: defaultProviders, defaultProvider: 'openai', defaultModel: 'gpt-4o', theme: 'dark' as const, mcpServers: [] as { id: string; name: string; command: string; args: string[]; env?: Record<string, string>; enabled: boolean }[] }
+let settings = { providers: defaultProviders, defaultProvider: 'openai', defaultModel: 'gpt-4o', theme: 'dark' as const, mcpServers: [
+  { id: 'yfnhanced-yahoo-finance', name: 'Yahoo Finance', command: 'npx', args: ['-y', 'yfnhanced-mcp'], enabled: false, githubUrl: 'https://github.com/kanishka-namdeo/yfnhanced-mcp', isDefault: true }
+] as { id: string; name: string; command: string; args: string[]; env?: Record<string, string>; enabled: boolean; githubUrl?: string; isDefault?: boolean }[] }
 
 // Install mock API on window if not in Electron
 export function installMockApi() {

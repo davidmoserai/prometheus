@@ -63,6 +63,8 @@ interface MCPServerConfig {
   args: string[]
   env?: Record<string, string>
   enabled: boolean
+  githubUrl?: string
+  isDefault?: boolean
 }
 
 interface PermissionSet {
@@ -505,6 +507,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   sendMessage: async (conversationId, message) => {
+    // Clear previous streaming parts at the start of a new turn
+    get().clearStreamingParts(conversationId)
     await window.api.chat.send(conversationId, message)
     // Backend pushes messages via chat:messageStored events — no re-fetch needed
     // Just sync the final state to get proper IDs and clear streaming
@@ -516,7 +520,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         )
       }))
     }
-    get().clearStreamingParts(conversationId)
+    // Don't clear streaming parts here — they contain tool calls and files
+    // that should stay visible. They get cleared when the next message starts streaming.
   },
 
   uploadFile: async (conversationId, filePath) => {

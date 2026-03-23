@@ -197,7 +197,7 @@ export interface RunOptions {
   mcpServers?: { id: string; command: string; args: string[]; env?: Record<string, string> }[]
   conversationHistory?: { role: string; content: string }[]
   onStream: (text: string) => void
-  onToolCall?: (data: { tool: string; summary: string }) => void
+  onToolCall?: (data: { tool: string; summary: string; detail?: string }) => void
 }
 
 /**
@@ -321,8 +321,17 @@ export function runClaudeCode(options: RunOptions): { promise: Promise<string>; 
             for (const block of content) {
               if (block.type === 'tool_use') {
                 const toolBlock = block as unknown as { name?: string; input?: Record<string, unknown> }
-                const inputStr = toolBlock.input ? JSON.stringify(toolBlock.input).slice(0, 100) : ''
-                onToolCall({ tool: toolBlock.name || 'unknown', summary: `${toolBlock.name}: ${inputStr}` })
+                const toolName = toolBlock.name || 'unknown'
+                // Short summary: just the tool name + key param (e.g. file path)
+                let summary = toolName
+                if (toolBlock.input) {
+                  const firstVal = Object.values(toolBlock.input)[0]
+                  if (typeof firstVal === 'string' && firstVal.length < 80) {
+                    summary = `${toolName}: ${firstVal}`
+                  }
+                }
+                const detail = toolBlock.input ? JSON.stringify(toolBlock.input, null, 2) : undefined
+                onToolCall({ tool: toolName, summary, detail })
               }
             }
           }

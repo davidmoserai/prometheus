@@ -419,7 +419,7 @@ export class AgentManager {
   }
 
   /** Set callback for notifying frontend when a tool is called */
-  setToolCallCallback(cb: (data: { conversationId: string; tool: string; summary: string }) => void) {
+  setToolCallCallback(cb: (data: { conversationId: string; tool: string; summary: string; detail?: string }) => void) {
     this.onToolCall = cb
   }
 
