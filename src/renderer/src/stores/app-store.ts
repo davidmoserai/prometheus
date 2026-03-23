@@ -211,6 +211,7 @@ interface AppState {
   isCreatingEmployee: boolean
   editingEmployeeId: string | null
   streamingParts: Record<string, StreamPart[]>
+  sendingConversationIds: Set<string>
   isLoading: boolean
   sidebarCollapsed: boolean
 
@@ -318,6 +319,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   isCreatingEmployee: false,
   editingEmployeeId: null,
   streamingParts: {},
+  sendingConversationIds: new Set<string>(),
   isLoading: false,
   sidebarCollapsed: false,
 
@@ -525,19 +527,17 @@ export const useAppStore = create<AppState>((set, get) => ({
   sendMessage: async (conversationId, message) => {
     // Clear previous streaming parts at the start of a new turn
     get().clearStreamingParts(conversationId)
-    await window.api.chat.send(conversationId, message)
-    // Backend pushes messages via chat:messageStored events — no re-fetch needed
-    // Just sync the final state to get proper IDs and clear streaming
-    const conv = await window.api.conversations.get(conversationId)
-    if (conv) {
-      set((state) => ({
-        conversations: state.conversations.map(c =>
-          c.id === conversationId ? conv : c
-        )
-      }))
+    set((state) => ({ sendingConversationIds: new Set([...state.sendingConversationIds, conversationId]) }))
+    try {
+      await window.api.chat.send(conversationId, message)
+      // Messages are pushed via chat:messageStored events — no refetch needed
+    } finally {
+      set((state) => {
+        const next = new Set(state.sendingConversationIds)
+        next.delete(conversationId)
+        return { sendingConversationIds: next }
+      })
     }
-    // Don't clear streaming parts here — they contain tool calls and files
-    // that should stay visible. They get cleared when the next message starts streaming.
   },
 
   uploadFile: async (conversationId, filePath) => {

@@ -815,7 +815,7 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
                                   </div>
                                   {tool.enabled && (
                                     <div className="flex items-center" style={{ gap: '8px' }}>
-                                      <span className="text-[11px] text-text-tertiary">Approval</span>
+                                      <span className="text-[11px] text-text-tertiary">Requires Approval</span>
                                       <Switch
                                         checked={tool.requiresApproval}
                                         onCheckedChange={() => toggleToolApproval(tool.id)}
@@ -852,6 +852,8 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
                       })
 
                       const enabledCount = mcpToolAssignments.filter(t => t.enabled).length
+                      const enabledTools = mcpToolAssignments.filter(t => t.enabled)
+                      const allEnabledRequireApproval = enabledTools.length > 0 && enabledTools.every(t => t.requiresApproval)
 
                       const toggleMcpTool = (toolId: string) => {
                         const existing = tools.find(t => t.id === toolId)
@@ -893,31 +895,51 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
                               }
                               <span className="text-[13px] font-semibold text-text-primary">MCP: {server.name}</span>
                             </div>
-                            <div className="flex items-center" style={{ gap: '10px' }}>
-                              <Badge variant="secondary">{enabledCount}/{mcpToolAssignments.length} enabled</Badge>
-                              <div onClick={(e) => e.stopPropagation()}>
-                                <Switch
-                                  checked={enabledCount === mcpToolAssignments.length && mcpToolAssignments.length > 0}
-                                  onCheckedChange={(checked) => {
-                                    const updatedTools = [...tools]
-                                    for (const mTool of mcpToolAssignments) {
-                                      const idx = updatedTools.findIndex(t => t.id === mTool.id)
-                                      if (idx >= 0) {
-                                        updatedTools[idx] = { ...updatedTools[idx], enabled: checked }
-                                      } else if (checked) {
-                                        updatedTools.push({ ...mTool, enabled: true })
-                                      }
-                                    }
-                                    setTools(updatedTools)
-                                  }}
-                                />
-                              </div>
-                            </div>
+                            <Badge variant="secondary">{enabledCount}/{mcpToolAssignments.length} enabled</Badge>
                           </button>
 
                           {/* Tool list */}
                           {!isCollapsed && (
                             <div className="flex flex-col" style={{ gap: '2px', padding: '4px' }}>
+                              {/* Column headers with bulk toggles */}
+                              <div className="flex items-center justify-between" style={{ padding: '8px 12px 4px' }}>
+                                <div className="flex items-center" style={{ gap: '10px' }}>
+                                  <Switch
+                                    checked={enabledCount === mcpToolAssignments.length && mcpToolAssignments.length > 0}
+                                    onCheckedChange={(checked) => {
+                                      const updatedTools = [...tools]
+                                      for (const mTool of mcpToolAssignments) {
+                                        const idx = updatedTools.findIndex(t => t.id === mTool.id)
+                                        if (idx >= 0) {
+                                          updatedTools[idx] = { ...updatedTools[idx], enabled: checked }
+                                        } else if (checked) {
+                                          updatedTools.push({ ...mTool, enabled: true })
+                                        }
+                                      }
+                                      setTools(updatedTools)
+                                    }}
+                                  />
+                                  <span className="text-[11px] font-semibold text-text-tertiary uppercase tracking-wide">Activate All</span>
+                                </div>
+                                {enabledTools.length > 0 && (
+                                  <div className="flex items-center" style={{ gap: '8px' }}>
+                                    <span className="text-[11px] font-semibold text-text-tertiary uppercase tracking-wide">Require Approval</span>
+                                    <Switch
+                                      checked={allEnabledRequireApproval}
+                                      onCheckedChange={(checked) => {
+                                        const updatedTools = [...tools]
+                                        for (const mTool of enabledTools) {
+                                          const idx = updatedTools.findIndex(t => t.id === mTool.id)
+                                          if (idx >= 0) {
+                                            updatedTools[idx] = { ...updatedTools[idx], requiresApproval: checked }
+                                          }
+                                        }
+                                        setTools(updatedTools)
+                                      }}
+                                    />
+                                  </div>
+                                )}
+                              </div>
                               {mcpToolAssignments.map((tool) => (
                                 <div
                                   key={tool.id}
@@ -937,7 +959,7 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
                                   </div>
                                   {tool.enabled && (
                                     <div className="flex items-center" style={{ gap: '8px' }}>
-                                      <span className="text-[11px] text-text-tertiary">Approval</span>
+                                      <span className="text-[11px] text-text-tertiary">Requires Approval</span>
                                       <Switch
                                         checked={tool.requiresApproval}
                                         onCheckedChange={() => toggleMcpToolApproval(tool.id)}
