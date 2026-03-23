@@ -685,6 +685,13 @@ export class AgentManager {
       : messages
 
     try {
+      // For tools that require approval, suppress the tool_call bubble — the approval card already shows the info
+      const filteredOnToolCall = onToolCall && requiresApprovalClaudeNames.size > 0
+        ? (data: { tool: string; summary: string; detail?: string }) => {
+            if (!requiresApprovalClaudeNames.has(data.tool)) onToolCall(data)
+          }
+        : onToolCall
+
       const { promise } = runClaudeCode({
         prompt,
         systemPrompt,
@@ -695,7 +702,7 @@ export class AgentManager {
         conversationHistory: history.length > 0 ? history : undefined,
         approvalServerPort: approvalServer?.port,
         onStream,
-        onToolCall,
+        onToolCall: filteredOnToolCall,
         onFileWritten
       })
       return await promise
