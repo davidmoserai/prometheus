@@ -163,6 +163,7 @@ function mapToolsForCLI(enabledToolIds: string[]): string[] {
 
 interface MCPConfigForCLI {
   mcpServers: Record<string, {
+    type?: 'stdio' | 'http' | 'sse'
     command?: string
     args?: string[]
     env?: Record<string, string>
@@ -190,8 +191,8 @@ function writeTempMcpConfig(servers: MCPServerForCLI[]): string {
   const config: MCPConfigForCLI = { mcpServers: {} }
   for (const server of servers) {
     if (server.url) {
-      // HTTP transport
-      config.mcpServers[server.id] = { url: server.url, headers: server.headers }
+      // HTTP transport — Claude Code requires "type" field
+      config.mcpServers[server.id] = { type: 'http', url: server.url, headers: server.headers }
     } else if (server.command) {
       // Stdio transport
       config.mcpServers[server.id] = { command: server.command, args: server.args || [], env: server.env }
