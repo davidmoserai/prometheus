@@ -144,7 +144,11 @@ export class MCPManager {
             fetch: async (url, init) => {
               return globalThis.fetch(url as string, {
                 ...init,
-                headers: { ...(init?.headers as Record<string, string> ?? {}), ...extraHeaders }
+                headers: {
+                  'Accept': 'application/json, text/event-stream',
+                  ...(init?.headers as Record<string, string> ?? {}),
+                  ...extraHeaders
+                }
               })
             }
           }
