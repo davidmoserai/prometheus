@@ -1,5 +1,4 @@
 import { Composio } from '@composio/core'
-import { shell } from 'electron'
 import type { MCPServerConfig } from './types'
 import type { IntegrationDefinition } from './integration-catalog'
 
@@ -12,7 +11,7 @@ export function setComposioMcpConfig(config: { url: string; headers: Record<stri
 }
 
 // ============================================================
-// ComposioManager — manages Composio session and OAuth flows
+// ComposioManager — manages Composio session and MCP connection
 // ============================================================
 
 export class ComposioManager {
@@ -26,7 +25,7 @@ export class ComposioManager {
 
   /**
    * Get the HTTP MCP config for this user's Composio session.
-   * Returns the url + headers needed for MCPManager to connect.
+   * Only includes toolkits for the specified connected apps.
    */
   async getMcpConfig(connectedAppIds?: string[]): Promise<MCPServerConfig> {
     const toolkits = connectedAppIds && connectedAppIds.length > 0 ? connectedAppIds : undefined
@@ -45,41 +44,18 @@ export class ComposioManager {
   }
 
   /**
-   * Initiate OAuth for an app (e.g. 'gmail', 'slack').
-   * Opens the redirect URL in the system browser.
-   * Returns a function to wait for the connection to complete.
+   * Fetch active connected accounts from Composio.
+   * Shared by both listConnectedApps and listActiveIntegrations.
    */
-  async authorizeApp(appId: string): Promise<{
-    redirectUrl: string
-    waitForConnection: (timeoutMs?: number) => Promise<boolean>
-  }> {
-    const session = await this.composio.create(this.userId)
-    const connectionRequest = await session.authorize(appId)
-
-    const redirectUrl = connectionRequest.redirectUrl ?? ''
-    if (redirectUrl) {
-      shell.openExternal(redirectUrl)
-    }
-
-    return {
-      redirectUrl,
-      waitForConnection: async (timeoutMs = 120000) => {
-        try {
-          await connectionRequest.waitForConnection(timeoutMs)
-          return true
-        } catch {
-          return false
-        }
-      }
-    }
+  private async fetchActiveAccounts() {
+    return this.composio.connectedAccounts.list({ statuses: ['ACTIVE'] })
   }
 
   /**
-   * List all apps in the catalog with their connection status for this user.
-   * Returns map of appId -> connected boolean.
+   * Returns a map of appId -> true for all actively connected apps.
    */
   async listConnectedApps(): Promise<Record<string, boolean>> {
-    const result = await this.composio.connectedAccounts.list({ statuses: ['ACTIVE'] })
+    const result = await this.fetchActiveAccounts()
     const connected: Record<string, boolean> = {}
     for (const account of result.items) {
       connected[account.toolkit.slug] = true
@@ -88,11 +64,10 @@ export class ComposioManager {
   }
 
   /**
-   * List only the apps the user has actively connected, with name and logo.
+   * Returns connected apps with display metadata (name, logo).
    */
   async listActiveIntegrations(): Promise<IntegrationDefinition[]> {
-    const result = await this.composio.connectedAccounts.list({ statuses: ['ACTIVE'] })
-
+    const result = await this.fetchActiveAccounts()
     if (result.items.length === 0) return []
 
     // Fetch toolkit metadata (name + logo) for each connected app
@@ -117,34 +92,5 @@ export class ComposioManager {
       category: '',
       description: ''
     }))
-  }
-
-  /**
-   * Disconnect an app by its toolkit slug.
-   */
-  /**
-   * Fetch the full catalog of available integrations from Composio.
-   * Filters out local toolkits and normalizes to IntegrationDefinition shape.
-   */
-  async getCatalog(): Promise<IntegrationDefinition[]> {
-    const toolkits = await this.composio.toolkits.get({})
-    return toolkits
-      .filter(t => !t.isLocalToolkit)
-      .map(t => ({
-        id: t.slug,
-        name: t.name,
-        icon: '🔗',
-        logo: t.meta.logo,
-        category: t.meta.categories?.[0]?.name ?? 'Other',
-        description: t.meta.description ?? ''
-      }))
-      .sort((a, b) => a.name.localeCompare(b.name))
-  }
-
-  async disconnectApp(appId: string): Promise<void> {
-    const result = await this.composio.connectedAccounts.list({ toolkitSlugs: [appId] })
-    const account = result.items[0]
-    if (!account) return
-    await this.composio.connectedAccounts.delete(account.id)
   }
 }

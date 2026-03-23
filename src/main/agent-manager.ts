@@ -1350,9 +1350,6 @@ export class AgentManager {
     // Composio integration instructions — tell the agent what apps it can use
     const composioTools = employee.tools.filter(t => t.source === 'mcp' && t.enabled && t.mcpServerId === 'composio-integrations')
     if (composioTools.length > 0) {
-      const connectedApps = Object.entries(
-        this.store.getSettings()
-      ).length // just need to check if composio is active
       prompt += '\n\n## Connected Integrations (via Composio)'
       prompt += '\nYou have access to external app integrations. Use these Composio tools to interact with connected apps:'
       prompt += '\n- COMPOSIO_SEARCH_TOOLS: Search for available actions in connected apps (e.g. search for "instagram" to find posting, analytics tools)'

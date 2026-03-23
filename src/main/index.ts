@@ -5,7 +5,6 @@ import { EmployeeStore } from './store'
 import { AgentManager } from './agent-manager'
 import { MCPManager } from './mcp-manager'
 import { ComposioManager, COMPOSIO_MCP_SERVER_ID, setComposioMcpConfig } from './composio-manager'
-import { INTEGRATION_CATALOG } from './integration-catalog'
 import { Scheduler } from './scheduler'
 import { ConversationService } from './conversation-service'
 import type { MCPServerConfig } from './types'
@@ -20,8 +19,6 @@ let agentManager: AgentManager
 let scheduler: Scheduler
 let convService: ConversationService
 
-// Stores pending OAuth waitForConnection callbacks keyed by appId
-const pendingConnections = new Map<string, (timeoutMs?: number) => Promise<boolean>>()
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -314,8 +311,6 @@ function registerIpcHandlers(): void {
     return { success: true }
   })
 
-  ipcMain.handle('composio:getCatalog', () => INTEGRATION_CATALOG)
-
   ipcMain.handle('composio:listActiveIntegrations', async () => {
     if (!composioManager) return []
     try {
@@ -332,47 +327,6 @@ function registerIpcHandlers(): void {
     } catch (err) {
       console.error('Failed to list Composio apps:', err)
       return {}
-    }
-  })
-
-  ipcMain.handle('composio:authorize', async (_event, appId: string) => {
-    if (!composioManager) return { success: false, error: 'Composio not configured' }
-    try {
-      const { redirectUrl, waitForConnection } = await composioManager.authorizeApp(appId)
-      // Store the callback so waitForConnection handler reuses the same OAuth session
-      pendingConnections.set(appId, waitForConnection)
-      return { success: true, redirectUrl }
-    } catch (err) {
-      return { success: false, error: err instanceof Error ? err.message : 'Authorization failed' }
-    }
-  })
-
-  ipcMain.handle('composio:waitForConnection', async (_event, appId: string) => {
-    if (!composioManager) return { success: false }
-    const waitFn = pendingConnections.get(appId)
-    if (!waitFn) return { success: false, error: 'No pending connection — call authorize first' }
-    try {
-      const connected = await waitFn(120000)
-      pendingConnections.delete(appId)
-      if (connected) {
-        // Refresh the Composio MCP connection to pick up the new toolkit
-        await reconnectComposioMcp()
-      }
-      return { success: connected }
-    } catch {
-      pendingConnections.delete(appId)
-      return { success: false }
-    }
-  })
-
-  ipcMain.handle('composio:disconnect', async (_event, appId: string) => {
-    if (!composioManager) return { success: false }
-    try {
-      await composioManager.disconnectApp(appId)
-      await reconnectComposioMcp()
-      return { success: true }
-    } catch (err) {
-      return { success: false, error: err instanceof Error ? err.message : 'Disconnect failed' }
     }
   })
 

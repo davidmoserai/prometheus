@@ -310,9 +310,6 @@ interface AppState {
   // Actions — Composio
   loadComposioStatus: () => Promise<void>
   setComposioApiKey: (apiKey: string) => Promise<void>
-  connectIntegration: (appId: string) => Promise<{ success: boolean; redirectUrl?: string }>
-  waitForIntegrationConnection: (appId: string) => Promise<boolean>
-  disconnectIntegration: (appId: string) => Promise<void>
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -771,27 +768,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     await get().loadComposioStatus()
   },
 
-  connectIntegration: async (appId) => {
-    if (!window.api?.composio) return { success: false }
-    return window.api.composio.authorize(appId)
-  },
-
-  waitForIntegrationConnection: async (appId) => {
-    if (!window.api?.composio) return false
-    const result = await window.api.composio.waitForConnection(appId)
-    if (result.success) {
-      await get().loadComposioStatus()
-      await get().loadMcpServers()
-    }
-    return result.success
-  },
-
-  disconnectIntegration: async (appId) => {
-    if (!window.api?.composio) return
-    await window.api.composio.disconnect(appId)
-    await get().loadComposioStatus()
-    await get().loadMcpServers()
-  }
 }))
 
 export type { Company, Department, ContactAccess, Employee, KnowledgeDocument, Conversation, ChatMessage, ChatAttachment, Task, TaskMessage, RecurringTask, AppNotification, AppSettings, ProviderConfig, ToolAssignment, PermissionSet, MCPServerConfig }

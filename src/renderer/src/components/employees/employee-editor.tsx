@@ -9,7 +9,6 @@ import { Badge } from '@/components/ui/badge'
 import { ContactAccessEditor } from './contact-access-editor'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useAppStore, type Employee, type ToolAssignment, type PermissionSet, type ContactAccess } from '@/stores/app-store'
-import { INTEGRATION_CATALOG_BY_ID } from '../../../../main/integration-catalog'
 
 const AVATARS = ['🔥', '⚡', '🧠', '🎯', '🚀', '💡', '🔮', '⭐', '🛡️', '🎨', '📊', '🔬', '📝', '🤖', '🦾', '🧬']
 
