@@ -108,6 +108,11 @@ function registerIpcHandlers(): void {
     )
   })
 
+  // Chat: tool approval response
+  ipcMain.handle('chat:respondApproval', (_event, approvalId: string, approved: boolean) => {
+    agentManager.respondToApproval(approvalId, approved)
+  })
+
   // Chat: token counting and compression
   ipcMain.handle('chat:countTokens', (_event, conversationId: string) => {
     return agentManager.countConversationTokens(conversationId)
@@ -284,6 +289,11 @@ app.whenReady().then(() => {
     mainWindow?.webContents.send('chat:toolCall', { ...data, id: `tc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` })
   })
 
+  // Push tool approval requests to frontend
+  agentManager.setApprovalRequestCallback((data) => {
+    mainWindow?.webContents.send('chat:approvalRequest', data)
+  })
+
   // Initialize and start the scheduler
   scheduler = new Scheduler(store, agentManager)
   scheduler.setTaskRunCallback((recurringTask) => {
@@ -333,6 +343,9 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', async () => {
+  // Cancel any pending tool approvals
+  agentManager?.cancelAllPendingApprovals()
+
   // Gracefully disconnect MCP servers on quit
   if (mcpManager) {
     await mcpManager.disconnectAll()

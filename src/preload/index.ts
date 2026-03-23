@@ -80,6 +80,13 @@ const api = {
       const handler = (_event: unknown, data: { conversationId: string; id: string; tool: string; summary: string; detail?: string }) => callback(data)
       ipcRenderer.on('chat:toolCall', handler)
       return () => ipcRenderer.removeListener('chat:toolCall', handler)
+    },
+    respondApproval: (approvalId: string, approved: boolean) =>
+      ipcRenderer.invoke('chat:respondApproval', approvalId, approved),
+    onApprovalRequest: (callback: (data: { conversationId: string; approvalId: string; tool: string; args: Record<string, unknown>; summary: string }) => void) => {
+      const handler = (_event: unknown, data: { conversationId: string; approvalId: string; tool: string; args: Record<string, unknown>; summary: string }) => callback(data)
+      ipcRenderer.on('chat:approvalRequest', handler)
+      return () => ipcRenderer.removeListener('chat:approvalRequest', handler)
     }
   },
   recurringTasks: {

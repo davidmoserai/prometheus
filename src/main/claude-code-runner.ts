@@ -198,6 +198,7 @@ export interface RunOptions {
   conversationHistory?: { role: string; content: string }[]
   onStream: (text: string) => void
   onToolCall?: (data: { tool: string; summary: string; detail?: string }) => void
+  onFileWritten?: (data: { path: string; content: string }) => void
 }
 
 /**
@@ -213,7 +214,8 @@ export function runClaudeCode(options: RunOptions): { promise: Promise<string>; 
     mcpServers,
     conversationHistory,
     onStream,
-    onToolCall
+    onToolCall,
+    onFileWritten
   } = options
 
   let child: ChildProcess | null = null
@@ -237,18 +239,26 @@ export function runClaudeCode(options: RunOptions): { promise: Promise<string>; 
       '--dangerously-skip-permissions'
     ]
 
-    // Map and set available tools
+    // Map employee's enabled tools to Claude Code built-in tool names
+    // Only these tools will be available — everything else is blocked
     const ccTools = mapToolsForCLI(enabledToolIds)
     if (ccTools.length > 0) {
       args.push('--tools', ccTools.join(','))
     } else {
-      // No tools — empty string disables all
+      // No tools — empty string disables all built-in tools
       args.push('--tools', '')
     }
 
-    // MCP servers
+    // Block user's personal MCP servers — only use what we explicitly provide
+    args.push('--strict-mcp-config')
+
+    // MCP servers (only employee's assigned ones)
     if (mcpServers && mcpServers.length > 0) {
       tempMcpPath = writeTempMcpConfig(mcpServers)
+      args.push('--mcp-config', tempMcpPath)
+    } else {
+      // Even with no MCP servers, we need --mcp-config for --strict-mcp-config to work
+      tempMcpPath = writeTempMcpConfig([])
       args.push('--mcp-config', tempMcpPath)
     }
 
@@ -317,21 +327,28 @@ export function runClaudeCode(options: RunOptions): { promise: Promise<string>; 
           }
 
           // Detect tool use blocks
-          if (onToolCall) {
-            for (const block of content) {
-              if (block.type === 'tool_use') {
-                const toolBlock = block as unknown as { name?: string; input?: Record<string, unknown> }
-                const toolName = toolBlock.name || 'unknown'
-                // Short summary: just the tool name + key param (e.g. file path)
-                let summary = toolName
-                if (toolBlock.input) {
-                  const firstVal = Object.values(toolBlock.input)[0]
-                  if (typeof firstVal === 'string' && firstVal.length < 80) {
-                    summary = `${toolName}: ${firstVal}`
-                  }
+          for (const block of content) {
+            if (block.type === 'tool_use') {
+              const toolBlock = block as unknown as { name?: string; input?: Record<string, unknown> }
+              const toolName = toolBlock.name || 'unknown'
+              // Short summary: just the tool name + key param (e.g. file path)
+              let summary = toolName
+              if (toolBlock.input) {
+                const firstVal = Object.values(toolBlock.input)[0]
+                if (typeof firstVal === 'string' && firstVal.length < 80) {
+                  summary = `${toolName}: ${firstVal}`
                 }
-                const detail = toolBlock.input ? JSON.stringify(toolBlock.input, null, 2) : undefined
-                onToolCall({ tool: toolName, summary, detail })
+              }
+              const detail = toolBlock.input ? JSON.stringify(toolBlock.input, null, 2) : undefined
+              onToolCall?.({ tool: toolName, summary, detail })
+
+              // Detect file writes from Claude Code's built-in Write tool
+              if ((toolName === 'Write' || toolName === 'write_file') && toolBlock.input) {
+                const filePath = (toolBlock.input.file_path || toolBlock.input.path) as string | undefined
+                const fileContent = (toolBlock.input.content || '') as string
+                if (filePath && onFileWritten) {
+                  onFileWritten({ path: filePath, content: fileContent })
+                }
               }
             }
           }
