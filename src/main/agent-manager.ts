@@ -9,7 +9,8 @@ import { EmployeeStore } from './store'
 import { ChatMessage, Employee, ProviderConfig, Task, TaskMessage, TOOL_IDS } from './types'
 import type { MCPManager } from './mcp-manager'
 import type { ConversationService } from './conversation-service'
-import { runClaudeCode } from './claude-code-runner'
+import { runClaudeCode, TOOL_MAP } from './claude-code-runner'
+import { startApprovalServer } from './claude-code-approval-server'
 import { getMemory, isSemanticRecallEnabled } from './memory'
 import type { Memory } from '@mastra/memory'
 
@@ -505,7 +506,8 @@ export class AgentManager {
     conversationId: string,
     content: string,
     onStream: (chunk: string) => void,
-    onMessageStored?: (msg: ChatMessage) => void
+    onMessageStored?: (msg: ChatMessage) => void,
+    skipApproval = false
   ): Promise<ChatMessage> {
     // Store user message via conversation service and notify frontend immediately
     const userMsg = await this.addMessage(conversationId, { role: 'user', content })
@@ -565,8 +567,8 @@ export class AgentManager {
     // Merge MCP tools that the employee has enabled
     const allTools = this.mergeEmployeeMcpTools(employee, tools)
 
-    // Wrap tools that require approval (unless autoApproveAll is set)
-    if (!employee.permissions.autoApproveAll && this.onApprovalRequest) {
+    // Wrap tools that require approval (unless autoApproveAll is set or this is an automated call)
+    if (!skipApproval && !employee.permissions.autoApproveAll && this.onApprovalRequest) {
       this.wrapToolsWithApproval(allTools, employee, conversationId)
     }
 
@@ -584,8 +586,10 @@ export class AgentManager {
           systemPrompt,
           fullMessages,
           onStream,
+          conversationId,
           toolCallCb ? (data) => toolCallCb(data) : undefined,
-          conversationId ? (data) => this.onFileWritten?.({ conversationId, ...data }) : undefined
+          conversationId ? (data) => this.onFileWritten?.({ conversationId, ...data }) : undefined,
+          skipApproval
         )
       } else {
         responseText = await this.runAgent(
@@ -600,11 +604,13 @@ export class AgentManager {
       }
 
       const msg = await this.addMessage(conversationId, { role: 'assistant', content: responseText })
+      onMessageStored?.(msg)
       return msg
     } catch (error) {
       const errorMsg = `Failed to get response: ${error instanceof Error ? error.message : 'Unknown error'}. Check your API key and model settings.`
       const msg = await this.addMessage(conversationId, { role: 'assistant', content: errorMsg })
       onStream(errorMsg)
+      onMessageStored?.(msg)
       return msg
     }
   }
@@ -666,13 +672,57 @@ export class AgentManager {
     systemPrompt: string,
     messages: { role: 'user' | 'assistant' | 'system'; content: string }[],
     onStream: (chunk: string) => void,
+    conversationId?: string,
     onToolCall?: (data: { tool: string; summary: string; detail?: string }) => void,
-    onFileWritten?: (data: { path: string; content: string }) => void
+    onFileWritten?: (data: { path: string; content: string }) => void,
+    skipApproval = false
   ): Promise<string> {
-    // Get enabled builtin tool IDs
+    // All enabled builtin tools are passed — approval is handled per-invocation via hooks
     const enabledToolIds = employee.tools
       .filter(t => t.enabled && t.source === 'builtin')
       .map(t => t.id)
+
+    // Determine which Claude Code tool names require per-invocation approval via hooks
+    const requiresApprovalClaudeNames = new Set<string>()
+    if (!skipApproval && !employee.permissions.autoApproveAll && this.onApprovalRequest) {
+      for (const tool of employee.tools.filter(t => t.enabled && t.requiresApproval)) {
+        if (tool.source === 'builtin') {
+          // Map builtin tool ID → Claude Code tool names (e.g. read_file → Read, Glob, Grep)
+          const ccNames = TOOL_MAP[tool.id] || []
+          ccNames.forEach(n => requiresApprovalClaudeNames.add(n))
+        } else if (tool.source === 'mcp' && tool.mcpServerId && tool.name) {
+          // MCP tools in Claude Code are referenced as mcp__serverId__toolName
+          requiresApprovalClaudeNames.add(`mcp__${tool.mcpServerId}__${tool.name}`)
+        }
+      }
+    }
+
+    // Start approval HTTP server if any tools need per-invocation approval
+    let approvalServer: { port: number; close: () => void } | null = null
+    if (requiresApprovalClaudeNames.size > 0) {
+      approvalServer = await startApprovalServer(async (toolName, toolInput) => {
+        if (!requiresApprovalClaudeNames.has(toolName)) return true
+        return new Promise<boolean>((resolve) => {
+          const approvalId = `approval-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+          const timer = setTimeout(() => {
+            this.pendingApprovals.delete(approvalId)
+            resolve(false)
+          }, 5 * 60 * 1000)
+          this.pendingApprovals.set(approvalId, { resolve, timer })
+          const firstVal = Object.values(toolInput)[0]
+          const summary = typeof firstVal === 'string' && firstVal.length < 80
+            ? `${toolName}: ${firstVal}`
+            : toolName
+          this.onApprovalRequest?.({
+            conversationId: conversationId || '',
+            approvalId,
+            tool: toolName,
+            args: toolInput,
+            summary
+          })
+        })
+      })
+    }
 
     // Get enabled MCP servers for this employee
     const mcpAssignments = employee.tools.filter(t => t.source === 'mcp' && t.enabled && t.mcpServerId)
@@ -681,7 +731,22 @@ export class AgentManager {
     const mcpServers = mcpServerIds
       .map(id => settings.mcpServers.find(s => s.id === id))
       .filter(Boolean)
-      .map(s => ({ id: s!.id, command: s!.command, args: s!.args, env: s!.env }))
+      .map(s => {
+        // Use resolved command to fix broken shebangs (e.g. npx packages without node shebang)
+        const resolved = this.mcpManager?.resolveCommand(s!) || { command: s!.command, args: s!.args }
+        return { id: s!.id, command: resolved.command, args: resolved.args, env: s!.env }
+      })
+
+    // Collect MCP tool names in Claude Code format: mcp__serverId__toolName
+    const mcpToolNames: string[] = []
+    if (this.mcpManager) {
+      for (const serverId of mcpServerIds) {
+        const serverTools = this.mcpManager.getTools(serverId)
+        for (const toolName of Object.keys(serverTools)) {
+          mcpToolNames.push(`mcp__${serverId}__${toolName}`)
+        }
+      }
+    }
 
     // Extract the latest user message as the prompt
     const lastUserMsg = [...messages].reverse().find(m => m.role === 'user')
@@ -692,19 +757,31 @@ export class AgentManager {
       ? messages.filter(m => m !== lastUserMsg)
       : messages
 
-    const { promise } = runClaudeCode({
-      prompt,
-      systemPrompt,
-      model: employee.model,
-      enabledToolIds,
-      mcpServers,
-      conversationHistory: history.length > 0 ? history : undefined,
-      onStream,
-      onToolCall,
-      onFileWritten
-    })
+    try {
+      // For tools that require approval, suppress the tool_call bubble — the approval card already shows the info
+      const filteredOnToolCall = onToolCall && requiresApprovalClaudeNames.size > 0
+        ? (data: { tool: string; summary: string; detail?: string }) => {
+            if (!requiresApprovalClaudeNames.has(data.tool)) onToolCall(data)
+          }
+        : onToolCall
 
-    return promise
+      const { promise } = runClaudeCode({
+        prompt,
+        systemPrompt,
+        model: employee.model,
+        enabledToolIds,
+        mcpServers,
+        mcpToolNames,
+        conversationHistory: history.length > 0 ? history : undefined,
+        approvalServerPort: approvalServer?.port,
+        onStream,
+        onToolCall: filteredOnToolCall,
+        onFileWritten
+      })
+      return await promise
+    } finally {
+      approvalServer?.close()
+    }
   }
 
   /**
@@ -988,7 +1065,8 @@ export class AgentManager {
       if (provider.id === 'claude-code') {
         responseText = await this.runClaudeCodeAgent(
           toEmployee, systemPrompt, messages, taskStreamCb,
-          (data) => {
+          undefined,
+          (data: { tool: string; summary: string; detail?: string }) => {
             this.store.addTaskMessage(task.id, { role: 'tool', content: `${data.tool}: ${data.summary}` })
             const current = this.store.getTask(task.id)
             if (current) this.onTaskUpdate?.(current)
@@ -1109,7 +1187,8 @@ export class AgentManager {
       if (provider.id === 'claude-code') {
         responseText = await this.runClaudeCodeAgent(
           toEmployee, systemPrompt, messages, continueStreamCb,
-          (data) => {
+          undefined,
+          (data: { tool: string; summary: string; detail?: string }) => {
             this.store.addTaskMessage(taskId, { role: 'tool', content: `${data.tool}: ${data.summary}` })
             const current = this.store.getTask(taskId)
             if (current) this.onTaskUpdate?.(current)
@@ -1224,9 +1303,8 @@ export class AgentManager {
       const assignment = this.findToolAssignment(employee, toolKey)
       if (!assignment?.requiresApproval) continue
 
-      const toolAsAny = tool as unknown as Record<string, unknown>
-      const originalExecute = toolAsAny.execute as (input: Record<string, unknown>) => Promise<Record<string, unknown>>
-      toolAsAny.execute = async (input: Record<string, unknown>) => {
+      const originalExecute = (tool as unknown as Record<string, unknown>).execute as (input: Record<string, unknown>) => Promise<Record<string, unknown>>
+      const wrappedExecute = async (input: Record<string, unknown>) => {
         const approvalId = `approval-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 
         // Build a readable summary of the tool call
@@ -1253,6 +1331,8 @@ export class AgentManager {
 
         return originalExecute(input)
       }
+      // Replace the tool entry with a new object to avoid frozen property issues
+      allTools[toolKey] = { ...tool, execute: wrappedExecute } as ReturnType<typeof createTool>
     }
   }
 

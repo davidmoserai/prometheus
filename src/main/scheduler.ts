@@ -80,7 +80,8 @@ export class Scheduler {
         conv.id,
         `[Scheduled Task: ${task.name}]\n\n${task.brief}`,
         () => {},
-        undefined
+        undefined,
+        true // skipApproval — automated tasks run without user approval gates
       )
 
       // Mark the delegated task as completed

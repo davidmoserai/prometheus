@@ -75,7 +75,12 @@ export class MCPManager {
    * Resolve command for MCP servers that use npx with broken shebangs.
    * If the installed binary is a JS file without a node shebang, run it with node directly.
    */
-  private resolveCommand(config: MCPServerConfig): { command: string; args: string[] } {
+  /** Public wrapper so agent-manager can resolve commands for Claude Code's MCP config */
+  resolveCommand(config: MCPServerConfig): { command: string; args: string[] } {
+    return this._resolveCommand(config)
+  }
+
+  private _resolveCommand(config: MCPServerConfig): { command: string; args: string[] } {
     if (config.command === 'npx') {
       try {
         const env = mcpEnv(config.env)
@@ -118,7 +123,7 @@ export class MCPManager {
     await this.disconnect(config.id)
 
     // Resolve command (fixes broken shebangs in npm packages)
-    const resolved = this.resolveCommand(config)
+    const resolved = this._resolveCommand(config)
 
     const client = new MCPClient({
       id: `prometheus-mcp-${config.id}`,

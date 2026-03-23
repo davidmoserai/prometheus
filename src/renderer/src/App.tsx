@@ -93,13 +93,27 @@ export default function App() {
     if (!window.api?.chat?.onMessageStored) return
     const unsub = window.api.chat.onMessageStored((data) => {
       const msg = data.message as ChatMessage
-      useAppStore.setState((state) => ({
-        conversations: state.conversations.map(c =>
-          c.id === data.conversationId
-            ? { ...c, messages: [...c.messages.filter(m => !m.id.startsWith('temp-')), msg] }
-            : c
-        )
-      }))
+      useAppStore.setState((state) => {
+        const newState: Record<string, unknown> = {
+          conversations: state.conversations.map(c =>
+            c.id === data.conversationId
+              ? { ...c, messages: [...c.messages.filter(m => !m.id.startsWith('temp-') && m.id !== msg.id), msg] }
+              : c
+          )
+        }
+        // Remove text parts from streaming when assistant message is stored to prevent duplicates
+        // Keep tool_call, file_written, and tool_approval parts as they're not in the persisted message
+        if (msg.role === 'assistant' && state.streamingParts[data.conversationId]) {
+          const nonTextParts = state.streamingParts[data.conversationId].filter(p => p.type !== 'text')
+          if (nonTextParts.length > 0) {
+            newState.streamingParts = { ...state.streamingParts, [data.conversationId]: nonTextParts }
+          } else {
+            const { [data.conversationId]: _, ...rest } = state.streamingParts
+            newState.streamingParts = rest
+          }
+        }
+        return newState
+      })
     })
     return unsub
   }, [])

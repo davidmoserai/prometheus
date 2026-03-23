@@ -129,6 +129,9 @@ const api = {
     getTools: (serverId: string) => ipcRenderer.invoke('mcp:getTools', serverId),
     testConnection: (config: unknown) => ipcRenderer.invoke('mcp:testConnection', config)
   },
+  shell: {
+    openExternal: (url: string) => ipcRenderer.invoke('shell:openExternal', url)
+  },
   updates: {
     onAvailable: (callback: () => void) => {
       const handler = () => callback()
