@@ -1,6 +1,8 @@
 import { MCPClient } from '@mastra/mcp'
+import { shell } from 'electron'
 import type { Tool } from '@mastra/core/tools'
 import type { MCPServerConfig } from './types'
+import type { Readable } from 'stream'
 
 // Build env with proper PATH for MCP subprocesses (Electron strips user paths)
 function mcpEnv(extra?: Record<string, string>): Record<string, string> {
@@ -23,6 +25,20 @@ function mcpEnv(extra?: Record<string, string>): Record<string, string> {
   return env
 }
 
+// Watch a stderr stream for URLs and open them in the system browser
+function watchStderrForUrls(stderr: Readable | null, serverId: string): void {
+  if (!stderr) return
+  stderr.on('data', (chunk: Buffer) => {
+    const text = chunk.toString()
+    // Look for URLs that look like OAuth/auth redirects
+    const urlMatch = text.match(/https?:\/\/[^\s"'<>]+/)
+    if (urlMatch) {
+      console.log(`MCP server "${serverId}" requested browser auth: ${urlMatch[0]}`)
+      shell.openExternal(urlMatch[0])
+    }
+  })
+}
+
 // ============================================================
 // MCPManager — manages MCP server connections and tool discovery
 // ============================================================
@@ -33,6 +49,7 @@ export class MCPManager {
 
   /**
    * Connect to an MCP server and discover its tools.
+   * Pipes stderr and watches for OAuth URLs to open in the system browser.
    * Returns the list of discovered tool names.
    */
   async connect(config: MCPServerConfig): Promise<string[]> {
@@ -45,15 +62,20 @@ export class MCPManager {
         [config.id]: {
           command: config.command,
           args: config.args,
-          env: mcpEnv(config.env)
+          env: mcpEnv(config.env),
+          stderr: 'pipe' as const
         }
       }
     })
 
     this.clients.set(config.id, client)
 
+    // Watch stderr for OAuth URLs and open them in the system browser
+    const stderr = (client as unknown as { stderr: Readable | null }).stderr
+    watchStderrForUrls(stderr, config.id)
+
     // Discover tools with a timeout so the UI doesn't hang
-    const timeoutMs = 30000
+    const timeoutMs = 60000
     const toolsetPromise = client.listToolsets()
     const timeoutPromise = new Promise<never>((_, reject) =>
       setTimeout(() => reject(new Error(`Connection timed out after ${timeoutMs / 1000}s — the server may need browser auth. Try running it manually first: ${config.command} ${config.args.join(' ')}`)), timeoutMs)
