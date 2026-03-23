@@ -61,7 +61,7 @@ const PROVIDER_INFO: Record<string, { description: string; signupUrl: string; co
     description: 'Use your Claude Code subscription. No API key needed.',
     signupUrl: 'https://claude.ai',
     color: 'text-amber-400',
-    icon: '>_',
+    icon: 'CC',
     glowColor: 'rgba(251, 191, 36, 0.15)'
   }
 }

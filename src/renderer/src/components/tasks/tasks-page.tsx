@@ -90,6 +90,7 @@ export function TasksPage() {
     brief: '',
     schedule: 'daily' as RecurringTask['schedule'],
     scheduleTime: '08:00',
+    scheduleDay: 'monday',
     enabled: true
   })
 
@@ -183,7 +184,7 @@ export function TasksPage() {
   const handleScheduledSubmit = async () => {
     if (!scheduledForm.name || !scheduledForm.employeeId || !scheduledForm.brief) return
     const timeValue = scheduledForm.schedule === 'weekly'
-      ? `monday ${scheduledForm.scheduleTime}`
+      ? `${scheduledForm.scheduleDay} ${scheduledForm.scheduleTime}`
       : scheduledForm.scheduleTime
 
     if (editingRecurringId) {
@@ -210,18 +211,20 @@ export function TasksPage() {
     }
     setShowScheduledForm(false)
     setEditingRecurringId(null)
-    setScheduledForm({ employeeId: '', name: '', brief: '', schedule: 'daily', scheduleTime: '08:00', enabled: true })
+    setScheduledForm({ employeeId: '', name: '', brief: '', schedule: 'daily', scheduleTime: '08:00', scheduleDay: 'monday', enabled: true })
   }
 
   const handleEditRecurring = (task: RecurringTask) => {
     const time = task.scheduleTime || '08:00'
     const cleanTime = task.schedule === 'weekly' ? time.split(' ')[1] || '08:00' : time
+    const cleanDay = task.schedule === 'weekly' ? time.split(' ')[0] || 'monday' : 'monday'
     setScheduledForm({
       employeeId: task.employeeId,
       name: task.name,
       brief: task.brief,
       schedule: task.schedule,
       scheduleTime: cleanTime,
+      scheduleDay: cleanDay,
       enabled: task.enabled
     })
     setEditingRecurringId(task.id)
@@ -261,7 +264,7 @@ export function TasksPage() {
               onClick={() => {
                 setShowScheduledForm(true)
                 setEditingRecurringId(null)
-                setScheduledForm({ employeeId: '', name: '', brief: '', schedule: 'daily', scheduleTime: '08:00', enabled: true })
+                setScheduledForm({ employeeId: '', name: '', brief: '', schedule: 'daily', scheduleTime: '08:00', scheduleDay: 'monday', enabled: true })
               }}
             >
               <Plus className="w-3.5 h-3.5" />
@@ -345,6 +348,25 @@ export function TasksPage() {
                       <option value="weekly">Weekly</option>
                     </select>
                   </div>
+                  {scheduledForm.schedule === 'weekly' && (
+                    <div className="flex-1">
+                      <label className="text-[12px] text-text-tertiary font-medium" style={{ display: 'block', marginBottom: '6px' }}>Day</label>
+                      <select
+                        value={scheduledForm.scheduleDay}
+                        onChange={(e) => setScheduledForm(f => ({ ...f, scheduleDay: e.target.value }))}
+                        className="w-full rounded-xl bg-bg-tertiary border border-border-default text-[13px] text-text-primary focus:outline-none focus:ring-2 focus:ring-flame-500/25 focus:border-flame-500/40"
+                        style={{ padding: '10px 14px' }}
+                      >
+                        <option value="monday">Monday</option>
+                        <option value="tuesday">Tuesday</option>
+                        <option value="wednesday">Wednesday</option>
+                        <option value="thursday">Thursday</option>
+                        <option value="friday">Friday</option>
+                        <option value="saturday">Saturday</option>
+                        <option value="sunday">Sunday</option>
+                      </select>
+                    </div>
+                  )}
                   {scheduledForm.schedule !== 'hourly' && (
                     <div className="flex-1">
                       <label className="text-[12px] text-text-tertiary font-medium" style={{ display: 'block', marginBottom: '6px' }}>Time</label>
@@ -381,7 +403,10 @@ export function TasksPage() {
             <div className="flex flex-col" style={{ gap: '10px' }}>
               {recurringTasks.map((rt, i) => {
                 const emp = employees.find(e => e.id === rt.employeeId)
-                const scheduleLabel = rt.schedule === 'hourly' ? 'Every hour' : rt.schedule === 'daily' ? `Daily at ${rt.scheduleTime || '08:00'}` : `Weekly — ${rt.scheduleTime || 'monday 08:00'}`
+                const weeklyParts = (rt.scheduleTime || 'monday 08:00').split(' ')
+                const weeklyDay = weeklyParts[0] ? weeklyParts[0].charAt(0).toUpperCase() + weeklyParts[0].slice(1) : 'Monday'
+                const weeklyTime = weeklyParts[1] || '08:00'
+                const scheduleLabel = rt.schedule === 'hourly' ? 'Every hour' : rt.schedule === 'daily' ? `Daily at ${rt.scheduleTime || '08:00'}` : `${weeklyDay} at ${weeklyTime}`
 
                 return (
                   <div
