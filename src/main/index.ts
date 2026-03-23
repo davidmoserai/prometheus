@@ -211,7 +211,21 @@ function registerIpcHandlers(): void {
   // MCP Server IPC Handlers
   ipcMain.handle('mcp:list', () => {
     const s = store.getSettings()
-    return s.mcpServers || []
+    const servers = s.mcpServers || []
+    // Include the in-memory Composio MCP server if it's connected (not persisted to disk)
+    const composioTools = mcpManager.getToolNames(COMPOSIO_MCP_SERVER_ID)
+    if (composioTools.length > 0) {
+      servers.push({
+        id: COMPOSIO_MCP_SERVER_ID,
+        name: 'Composio Integrations',
+        command: '',
+        args: [],
+        enabled: true,
+        transport: 'http' as const,
+        isComposio: true
+      })
+    }
+    return servers
   })
 
   ipcMain.handle('mcp:add', async (_event, config: MCPServerConfig) => {
