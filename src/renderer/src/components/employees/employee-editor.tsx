@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
 import { ContactAccessEditor } from './contact-access-editor'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useAppStore, type Employee, type ToolAssignment, type PermissionSet, type ContactAccess } from '@/stores/app-store'
 
 const AVATARS = ['🔥', '⚡', '🧠', '🎯', '🚀', '💡', '🔮', '⭐', '🛡️', '🎨', '📊', '🔬', '📝', '🤖', '🦾', '🧬']
@@ -337,6 +338,7 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
   const [newDeptName, setNewDeptName] = useState('')
   const [memoryText, setMemoryText] = useState(employee?.memory || '')
   const [loadingMemory, setLoadingMemory] = useState(false)
+  const [clearMemoryConfirmOpen, setClearMemoryConfirmOpen] = useState(false)
 
   // Load working memory from Mastra when editing
   useEffect(() => {
@@ -742,10 +744,7 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={async () => {
-                              await window.api.memory?.clearWorkingMemory(employee!.id)
-                              setMemoryText('')
-                            }}
+                            onClick={() => setClearMemoryConfirmOpen(true)}
                             className="text-red-400 hover:text-red-300 hover:bg-red-500/10"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -753,6 +752,19 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
                           </Button>
                         )}
                       </div>
+                      <ConfirmDialog
+                        open={clearMemoryConfirmOpen}
+                        title="Clear working memory?"
+                        description="This will permanently erase the agent's working memory. This cannot be undone."
+                        confirmLabel="Clear"
+                        variant="destructive"
+                        onConfirm={async () => {
+                          await window.api.memory?.clearWorkingMemory(employee!.id)
+                          setMemoryText('')
+                          setClearMemoryConfirmOpen(false)
+                        }}
+                        onCancel={() => setClearMemoryConfirmOpen(false)}
+                      />
                     </div>
                   </CardContent>
                 </Card>
