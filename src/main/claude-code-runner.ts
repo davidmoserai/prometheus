@@ -39,9 +39,19 @@ export interface ClaudeAuthStatus {
  * Check if Claude Code CLI is installed and accessible.
  */
 // Build env without Electron vars that break child CLI processes
+// Also ensure common bin paths are in PATH (Electron strips them)
 function cleanEnv(): NodeJS.ProcessEnv {
   const env = { ...process.env }
   delete env.ELECTRON_RUN_AS_NODE
+  const home = env.HOME || ''
+  const extraPaths = [
+    `${home}/.local/bin`,
+    `${home}/.nvm/current/bin`,
+    '/usr/local/bin',
+    '/opt/homebrew/bin'
+  ]
+  const currentPath = env.PATH || ''
+  env.PATH = [...extraPaths, currentPath].join(':')
   return env
 }
 
