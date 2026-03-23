@@ -38,9 +38,16 @@ export interface ClaudeAuthStatus {
 /**
  * Check if Claude Code CLI is installed and accessible.
  */
+// Build env without Electron vars that break child CLI processes
+function cleanEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env }
+  delete env.ELECTRON_RUN_AS_NODE
+  return env
+}
+
 export function isClaudeCodeInstalled(): boolean {
   try {
-    execSync('claude --version', { encoding: 'utf-8', timeout: 5000, stdio: 'pipe' })
+    execSync('claude --version', { encoding: 'utf-8', timeout: 5000, stdio: 'pipe', env: cleanEnv() })
     return true
   } catch {
     return false
@@ -55,7 +62,8 @@ export function getAuthStatus(): ClaudeAuthStatus {
     const output = execSync('claude auth status --text', {
       encoding: 'utf-8',
       timeout: 10000,
-      stdio: 'pipe'
+      stdio: 'pipe',
+      env: cleanEnv()
     }).trim()
 
     // Parse the text output
@@ -85,7 +93,8 @@ export function launchLogin(): Promise<ClaudeAuthStatus> {
   return new Promise((resolve) => {
     const child = spawn('claude', ['auth', 'login'], {
       stdio: 'inherit',
-      shell: true
+      shell: true,
+      env: cleanEnv()
     })
 
     child.on('close', () => {
@@ -233,14 +242,17 @@ export function runClaudeCode(options: RunOptions): { promise: Promise<string>; 
     }
     fullPrompt += prompt
 
-    // Append prompt as the last arg
+    // Pass prompt as positional arg
     args.push(fullPrompt)
 
-    // Spawn the process
+    // Spawn the process (cleanEnv strips ELECTRON_RUN_AS_NODE)
     child = spawn('claude', args, {
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env }
+      env: cleanEnv()
     })
+
+    // Close stdin immediately so Claude doesn't wait for piped input
+    child.stdin?.end()
 
     let accumulated = ''
     let buffer = ''
