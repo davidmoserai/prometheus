@@ -530,7 +530,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((state) => ({ sendingConversationIds: new Set([...state.sendingConversationIds, conversationId]) }))
     try {
       await window.api.chat.send(conversationId, message)
-      // Messages are pushed via chat:messageStored events — no refetch needed
+      // Refetch to ensure all messages are present (messageStored events may arrive after invoke resolves)
+      const conv = await window.api.conversations.get(conversationId)
+      if (conv) {
+        set((state) => ({
+          conversations: state.conversations.map(c => c.id === conversationId ? conv : c)
+        }))
+      }
     } finally {
       set((state) => {
         const next = new Set(state.sendingConversationIds)

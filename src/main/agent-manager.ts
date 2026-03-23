@@ -545,11 +545,13 @@ export class AgentManager {
       }
 
       const msg = this.store.addMessage(conversationId, { role: 'assistant', content: responseText })
+      onMessageStored?.(msg)
       return msg
     } catch (error) {
       const errorMsg = `Failed to get response: ${error instanceof Error ? error.message : 'Unknown error'}. Check your API key and model settings.`
       const msg = this.store.addMessage(conversationId, { role: 'assistant', content: errorMsg })
       onStream(errorMsg)
+      onMessageStored?.(msg)
       return msg
     }
   }
@@ -623,9 +625,9 @@ export class AgentManager {
           // Map builtin tool ID → Claude Code tool names (e.g. read_file → Read, Glob, Grep)
           const ccNames = TOOL_MAP[tool.id] || []
           ccNames.forEach(n => requiresApprovalClaudeNames.add(n))
-        } else if (tool.source === 'mcp' && tool.name) {
-          // MCP tools use their name directly
-          requiresApprovalClaudeNames.add(tool.name)
+        } else if (tool.source === 'mcp' && tool.mcpServerId && tool.name) {
+          // MCP tools in Claude Code are referenced as mcp__serverId__toolName
+          requiresApprovalClaudeNames.add(`mcp__${tool.mcpServerId}__${tool.name}`)
         }
       }
     }
@@ -664,14 +666,20 @@ export class AgentManager {
     const mcpServers = mcpServerIds
       .map(id => settings.mcpServers.find(s => s.id === id))
       .filter(Boolean)
-      .map(s => ({ id: s!.id, command: s!.command, args: s!.args, env: s!.env }))
+      .map(s => {
+        // Use resolved command to fix broken shebangs (e.g. npx packages without node shebang)
+        const resolved = this.mcpManager?.resolveCommand(s!) || { command: s!.command, args: s!.args }
+        return { id: s!.id, command: resolved.command, args: resolved.args, env: s!.env }
+      })
 
-    // Collect MCP tool names so Claude Code CLI can allow them alongside builtin tools
+    // Collect MCP tool names in Claude Code format: mcp__serverId__toolName
     const mcpToolNames: string[] = []
     if (this.mcpManager) {
       for (const serverId of mcpServerIds) {
         const serverTools = this.mcpManager.getTools(serverId)
-        mcpToolNames.push(...Object.keys(serverTools))
+        for (const toolName of Object.keys(serverTools)) {
+          mcpToolNames.push(`mcp__${serverId}__${toolName}`)
+        }
       }
     }
 

@@ -293,7 +293,9 @@ export function runClaudeCode(options: RunOptions): { promise: Promise<string>; 
       '--dangerously-skip-permissions'
     ]
 
-    // Map employee's enabled builtin tools to Claude Code tool names, then append any MCP tool names
+    // Map employee's enabled builtin tools to Claude Code tool names, plus any MCP tool names.
+    // MCP tool names must be in --tools so Claude Code allows them (it's a strict allowlist).
+    // The resolved command in --mcp-config ensures the MCP server starts correctly.
     const ccTools = [
       ...mapToolsForCLI(enabledToolIds),
       ...(mcpToolNames || [])

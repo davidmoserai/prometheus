@@ -58,6 +58,7 @@ export function ChatPage() {
   const activeConversation = conversations.find((c) => c.id === selectedConversationId)
   const currentParts = selectedConversationId ? streamingParts[selectedConversationId] : undefined
   const hasStreamingContent = currentParts && currentParts.length > 0
+  const hasStreamingText = currentParts?.some(p => p.type === 'text') ?? false
 
   useEffect(() => {
     if (selectedEmployeeId) {
@@ -412,34 +413,14 @@ export function ChatPage() {
               {activeConversation.messages.map((msg) => (
                 <MessageBubble key={msg.id} message={msg} employeeName={selectedEmployee?.name} employeeAvatar={selectedEmployee?.avatar} />
               ))}
-              {/* Thinking indicator — shows when waiting for response */}
-              {isSending && !hasStreamingContent && (
-                <div className="flex animate-fade-in" style={{ gap: '14px' }}>
-                  <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-bg-elevated text-sm shrink-0">
-                    {selectedEmployee?.avatar}
-                  </div>
-                  <div className="flex-1 max-w-2xl">
-                    <div className="rounded-2xl rounded-tl-lg bg-bg-elevated border border-border-default" style={{ padding: '12px 16px' }}>
-                      <div className="flex items-center" style={{ gap: '6px' }}>
-                        <div className="flex" style={{ gap: '4px' }}>
-                          <span className="w-2 h-2 rounded-full bg-text-tertiary" style={{ animation: 'pulse-dot 1.4s ease-in-out infinite', animationDelay: '0s' }} />
-                          <span className="w-2 h-2 rounded-full bg-text-tertiary" style={{ animation: 'pulse-dot 1.4s ease-in-out infinite', animationDelay: '0.2s' }} />
-                          <span className="w-2 h-2 rounded-full bg-text-tertiary" style={{ animation: 'pulse-dot 1.4s ease-in-out infinite', animationDelay: '0.4s' }} />
-                        </div>
-                        <span className="text-[13px] text-text-tertiary" style={{ marginLeft: '4px' }}>Thinking...</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-              {/* Unified streaming turn — text, tool calls, files all chronological */}
-              {hasStreamingContent && (
+              {/* Unified streaming turn — text, tool calls, files, approvals all chronological */}
+              {(hasStreamingContent || (isSending && !hasStreamingText)) && (
                 <div className="flex animate-fade-in" style={{ gap: '14px' }}>
                   <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-bg-elevated text-sm shrink-0" style={{ marginTop: '2px' }}>
                     {selectedEmployee?.avatar}
                   </div>
                   <div className="flex-1 max-w-2xl flex flex-col" style={{ gap: '6px' }}>
-                    {currentParts!.map((part, i) => {
+                    {(currentParts ?? []).map((part, i) => {
                       if (part.type === 'text') {
                         return (
                           <div key={`text-${i}`} className="rounded-2xl rounded-tl-lg bg-bg-elevated border border-border-default" style={{ padding: '12px 16px' }}>
@@ -587,6 +568,18 @@ export function ChatPage() {
                       }
                       return null
                     })}
+                    {/* Inline thinking dots — shown when agent is working but no text yet */}
+                    {isSending && !hasStreamingText && (
+                      <div className="rounded-2xl rounded-tl-lg bg-bg-elevated border border-border-default" style={{ padding: '12px 16px' }}>
+                        <div className="flex items-center" style={{ gap: '6px' }}>
+                          <div className="flex" style={{ gap: '4px' }}>
+                            <span className="w-2 h-2 rounded-full bg-text-tertiary" style={{ animation: 'pulse-dot 1.4s ease-in-out infinite', animationDelay: '0s' }} />
+                            <span className="w-2 h-2 rounded-full bg-text-tertiary" style={{ animation: 'pulse-dot 1.4s ease-in-out infinite', animationDelay: '0.2s' }} />
+                            <span className="w-2 h-2 rounded-full bg-text-tertiary" style={{ animation: 'pulse-dot 1.4s ease-in-out infinite', animationDelay: '0.4s' }} />
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
