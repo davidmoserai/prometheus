@@ -4,6 +4,7 @@ import { join } from 'path'
 import { EmployeeStore } from './store'
 import { AgentManager } from './agent-manager'
 import { MCPManager } from './mcp-manager'
+import { ComposioManager, COMPOSIO_MCP_SERVER_ID, setComposioMcpConfig } from './composio-manager'
 import { Scheduler } from './scheduler'
 import { ConversationService } from './conversation-service'
 import type { MCPServerConfig } from './types'
@@ -13,9 +14,11 @@ import { initMemory, getMemory } from './memory'
 let mainWindow: BrowserWindow | null = null
 let store: EmployeeStore
 let mcpManager: MCPManager
+let composioManager: ComposioManager | null = null
 let agentManager: AgentManager
 let scheduler: Scheduler
 let convService: ConversationService
+
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -54,6 +57,8 @@ function registerIpcHandlers(): void {
   ipcMain.handle('companies:getActive', () => store.getActiveCompanyId())
   ipcMain.handle('companies:setActive', async (_event, id: string) => {
     store.setActiveCompany(id)
+    // Re-init Composio with the new company's userId so OAuth tokens are scoped correctly
+    await initComposio()
     // Migrate legacy memory for employees in the newly active company
     try {
       const mem = getMemory()
@@ -208,7 +213,21 @@ function registerIpcHandlers(): void {
   // MCP Server IPC Handlers
   ipcMain.handle('mcp:list', () => {
     const s = store.getSettings()
-    return s.mcpServers || []
+    const servers = s.mcpServers || []
+    // Include the in-memory Composio MCP server if it's connected (not persisted to disk)
+    const composioTools = mcpManager.getToolNames(COMPOSIO_MCP_SERVER_ID)
+    if (composioTools.length > 0) {
+      servers.push({
+        id: COMPOSIO_MCP_SERVER_ID,
+        name: 'Composio Integrations',
+        command: '',
+        args: [],
+        enabled: true,
+        transport: 'http' as const,
+        isComposio: true
+      })
+    }
+    return servers
   })
 
   ipcMain.handle('mcp:add', async (_event, config: MCPServerConfig) => {
@@ -274,6 +293,43 @@ function registerIpcHandlers(): void {
     }
   })
 
+  // Composio Integrations IPC Handlers
+  ipcMain.handle('composio:hasApiKey', () => {
+    return !!store.getComposioApiKey()
+  })
+
+  ipcMain.handle('composio:setApiKey', async (_event, apiKey: string) => {
+    try {
+      // Validate key before saving — attempt a real API call
+      const testManager = new ComposioManager(apiKey, 'validation-test')
+      await testManager.listConnectedApps()
+    } catch {
+      return { success: false, error: 'Invalid API key — please check and try again' }
+    }
+    store.setComposioApiKey(apiKey)
+    await initComposio()
+    return { success: true }
+  })
+
+  ipcMain.handle('composio:listActiveIntegrations', async () => {
+    if (!composioManager) return []
+    try {
+      return await composioManager.listActiveIntegrations()
+    } catch {
+      return []
+    }
+  })
+
+  ipcMain.handle('composio:listApps', async () => {
+    if (!composioManager) return {}
+    try {
+      return await composioManager.listConnectedApps()
+    } catch (err) {
+      console.error('Failed to list Composio apps:', err)
+      return {}
+    }
+  })
+
   // Claude Code IPC Handlers
   ipcMain.handle('claude-code:isInstalled', () => {
     return isClaudeCodeInstalled()
@@ -294,6 +350,54 @@ function registerIpcHandlers(): void {
 
   // Open URLs in the system default browser
   ipcMain.handle('shell:openExternal', (_, url: string) => shell.openExternal(url))
+}
+
+// Initialize or reinitialize Composio and connect its MCP session
+async function initComposio(): Promise<void> {
+  const apiKey = store.getComposioApiKey()
+  if (!apiKey) return
+
+  const activeCompanyId = store.getActiveCompanyId()
+  const userId = activeCompanyId ?? 'default'
+
+  composioManager = new ComposioManager(apiKey, userId)
+  await reconnectComposioMcp()
+}
+
+// Mutex to prevent concurrent reconnect calls
+let reconnectPromise: Promise<void> = Promise.resolve()
+
+// Refresh the Composio HTTP MCP connection (serialized via mutex)
+function reconnectComposioMcp(): Promise<void> {
+  reconnectPromise = reconnectPromise.then(() => doReconnectComposioMcp())
+  return reconnectPromise
+}
+
+async function doReconnectComposioMcp(): Promise<void> {
+  if (!composioManager) return
+  try {
+    // Only expose tools for apps the user has actually connected
+    const connectedApps = await composioManager.listConnectedApps()
+    const connectedAppIds = Object.entries(connectedApps).filter(([, v]) => v).map(([k]) => k)
+
+    // If no apps are connected, disconnect any existing Composio MCP session and stop
+    if (connectedAppIds.length === 0) {
+      await mcpManager.disconnect(COMPOSIO_MCP_SERVER_ID)
+      setComposioMcpConfig(null)
+      return
+    }
+
+    const mcpConfig = await composioManager.getMcpConfig(connectedAppIds)
+
+    // Store HTTP config in memory for Claude Code agent to use
+    setComposioMcpConfig({ url: mcpConfig.url!, headers: mcpConfig.headers || {} })
+
+    // Connect via MCPManager — do NOT persist to settings (config contains ephemeral session tokens)
+    await mcpManager.connect(mcpConfig)
+    console.log(`Composio MCP connected with ${connectedAppIds.length} toolkit(s)`)
+  } catch (err) {
+    console.error('Failed to connect Composio MCP:', err)
+  }
 }
 
 app.whenReady().then(async () => {
@@ -326,11 +430,18 @@ app.whenReady().then(async () => {
   }
 
   agentManager = new AgentManager(store, mcpManager, convService)
-  if (settings.mcpServers?.length > 0) {
-    mcpManager.connectAll(settings.mcpServers).catch(err => {
+  // Connect only non-Composio MCP servers on startup (Composio connects separately)
+  const customServers = (settings.mcpServers || []).filter(s => !s.isComposio)
+  if (customServers.length > 0) {
+    mcpManager.connectAll(customServers).catch(err => {
       console.error('Failed to connect MCP servers on startup:', err)
     })
   }
+
+  // Connect Composio if API key is configured
+  initComposio().catch(err => {
+    console.error('Failed to initialize Composio on startup:', err)
+  })
 
   // Push task updates to frontend in real-time
   agentManager.setTaskUpdateCallback((task) => {

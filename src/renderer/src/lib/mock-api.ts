@@ -498,6 +498,12 @@ export function installMockApi() {
       get: async () => settings,
       update: async (s: Partial<typeof settings>) => { settings = { ...settings, ...s }; return settings }
     },
+    composio: {
+      hasApiKey: async () => false,
+      setApiKey: async (_apiKey: string) => ({ success: true }),
+      listApps: async () => ({}),
+      listActiveIntegrations: async () => []
+    },
     shell: {
       openExternal: async (_url: string) => {}
     }

@@ -57,6 +57,11 @@ export interface MCPServerConfig {
   enabled: boolean
   githubUrl?: string
   isDefault?: boolean
+  // HTTP transport fields (for Composio and other remote MCP servers)
+  transport?: 'stdio' | 'http'
+  url?: string
+  headers?: Record<string, string>
+  isComposio?: boolean
 }
 
 export const DEFAULT_MCP_SERVERS: MCPServerConfig[] = [
@@ -163,6 +168,7 @@ export interface AppSettings {
   defaultModel: string
   theme: 'dark' | 'light'
   mcpServers: MCPServerConfig[]
+  composioApiKey?: string
 }
 
 export interface ProviderConfig {

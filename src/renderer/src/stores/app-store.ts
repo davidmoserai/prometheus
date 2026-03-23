@@ -66,6 +66,10 @@ interface MCPServerConfig {
   enabled: boolean
   githubUrl?: string
   isDefault?: boolean
+  transport?: 'stdio' | 'http'
+  url?: string
+  headers?: Record<string, string>
+  isComposio?: boolean
 }
 
 interface PermissionSet {
@@ -204,6 +208,10 @@ interface AppState {
   mcpServers: MCPServerConfig[]
   mcpToolNames: Record<string, string[]> // serverId -> tool names
 
+  // Composio Integrations
+  composioApiKeySet: boolean
+  composioConnectedApps: Record<string, boolean> // appId -> connected
+
   // UI State
   activeView: 'dashboard' | 'employees' | 'chat' | 'knowledge' | 'tasks' | 'settings'
   selectedEmployeeId: string | null
@@ -298,6 +306,10 @@ interface AppState {
   removeMcpServer: (id: string) => Promise<void>
   getMcpTools: (serverId: string) => Promise<string[]>
   testMcpConnection: (config: MCPServerConfig) => Promise<{ success: boolean; tools?: string[]; error?: string }>
+
+  // Actions — Composio
+  loadComposioStatus: () => Promise<void>
+  setComposioApiKey: (apiKey: string) => Promise<void>
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -313,6 +325,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   notifications: [],
   mcpServers: [],
   mcpToolNames: {},
+  composioApiKeySet: false,
+  composioConnectedApps: {},
   settings: null,
   activeView: 'dashboard',
   selectedEmployeeId: null,
@@ -733,7 +747,27 @@ export const useAppStore = create<AppState>((set, get) => ({
   testMcpConnection: async (config) => {
     if (!window.api?.mcp) return { success: false, error: 'MCP not available' }
     return window.api.mcp.testConnection(config)
-  }
+  },
+
+  // Composio actions
+  loadComposioStatus: async () => {
+    if (!window.api?.composio) return
+    const [apiKeySet, connectedApps] = await Promise.all([
+      window.api.composio.hasApiKey(),
+      window.api.composio.listApps()
+    ])
+    set({ composioApiKeySet: apiKeySet, composioConnectedApps: connectedApps || {} })
+  },
+
+  setComposioApiKey: async (apiKey) => {
+    if (!window.api?.composio) return
+    await window.api.composio.setApiKey(apiKey)
+    set({ composioApiKeySet: true })
+    // Reload MCP servers after Composio connects (it adds a new server entry)
+    await get().loadMcpServers()
+    await get().loadComposioStatus()
+  },
+
 }))
 
 export type { Company, Department, ContactAccess, Employee, KnowledgeDocument, Conversation, ChatMessage, ChatAttachment, Task, TaskMessage, RecurringTask, AppNotification, AppSettings, ProviderConfig, ToolAssignment, PermissionSet, MCPServerConfig }

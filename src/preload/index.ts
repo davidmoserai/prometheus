@@ -131,6 +131,12 @@ const api = {
     getTools: (serverId: string) => ipcRenderer.invoke('mcp:getTools', serverId),
     testConnection: (config: unknown) => ipcRenderer.invoke('mcp:testConnection', config)
   },
+  composio: {
+    hasApiKey: () => ipcRenderer.invoke('composio:hasApiKey'),
+    setApiKey: (apiKey: string) => ipcRenderer.invoke('composio:setApiKey', apiKey),
+    listApps: () => ipcRenderer.invoke('composio:listApps'),
+    listActiveIntegrations: () => ipcRenderer.invoke('composio:listActiveIntegrations')
+  },
   shell: {
     openExternal: (url: string) => ipcRenderer.invoke('shell:openExternal', url)
   },
