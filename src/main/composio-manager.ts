@@ -21,8 +21,9 @@ export class ComposioManager {
    * Get the HTTP MCP config for this user's Composio session.
    * Returns the url + headers needed for MCPManager to connect.
    */
-  async getMcpConfig(): Promise<MCPServerConfig> {
-    const session = await this.composio.create(this.userId)
+  async getMcpConfig(connectedAppIds?: string[]): Promise<MCPServerConfig> {
+    const toolkits = connectedAppIds && connectedAppIds.length > 0 ? connectedAppIds : undefined
+    const session = await this.composio.create(this.userId, toolkits ? { toolkits } : undefined)
     return {
       id: COMPOSIO_MCP_SERVER_ID,
       name: 'Composio Integrations',
@@ -90,9 +91,6 @@ export class ComposioManager {
     const connectedAccountId = toolkit?.connection?.connectedAccount?.id
     if (!connectedAccountId) return
 
-    // Delete the connected account via the Composio API
-    await (this.composio as unknown as {
-      connectedAccounts: { delete: (id: string) => Promise<void> }
-    }).connectedAccounts.delete(connectedAccountId)
+    await this.composio.connectedAccounts.delete(connectedAccountId)
   }
 }

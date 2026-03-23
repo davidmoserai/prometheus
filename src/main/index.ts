@@ -17,6 +17,9 @@ let composioManager: ComposioManager | null = null
 let agentManager: AgentManager
 let scheduler: Scheduler
 
+// Stores pending OAuth waitForConnection callbacks keyed by appId
+const pendingConnections = new Map<string, (timeoutMs?: number) => Promise<boolean>>()
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -52,7 +55,11 @@ function registerIpcHandlers(): void {
   // Company IPC Handlers
   ipcMain.handle('companies:list', () => store.listCompanies())
   ipcMain.handle('companies:getActive', () => store.getActiveCompanyId())
-  ipcMain.handle('companies:setActive', (_event, id: string) => store.setActiveCompany(id))
+  ipcMain.handle('companies:setActive', async (_event, id: string) => {
+    store.setActiveCompany(id)
+    // Re-init Composio with the new company's userId so OAuth tokens are scoped correctly
+    await initComposio()
+  })
   ipcMain.handle('companies:create', (_event, data) => store.createCompany(data))
   ipcMain.handle('companies:update', (_event, id: string, data) => store.updateCompany(id, data))
   ipcMain.handle('companies:delete', (_event, id: string) => store.deleteCompany(id))
@@ -228,6 +235,13 @@ function registerIpcHandlers(): void {
   })
 
   ipcMain.handle('composio:setApiKey', async (_event, apiKey: string) => {
+    try {
+      // Validate key before saving — attempt a real API call
+      const testManager = new ComposioManager(apiKey, 'validation-test')
+      await testManager.listConnectedApps()
+    } catch {
+      return { success: false, error: 'Invalid API key — please check and try again' }
+    }
     store.setComposioApiKey(apiKey)
     await initComposio()
     return { success: true }
@@ -250,7 +264,9 @@ function registerIpcHandlers(): void {
   ipcMain.handle('composio:authorize', async (_event, appId: string) => {
     if (!composioManager) return { success: false, error: 'Composio not configured' }
     try {
-      const { redirectUrl } = await composioManager.authorizeApp(appId)
+      const { redirectUrl, waitForConnection } = await composioManager.authorizeApp(appId)
+      // Store the callback so waitForConnection handler reuses the same OAuth session
+      pendingConnections.set(appId, waitForConnection)
       return { success: true, redirectUrl }
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Authorization failed' }
@@ -259,15 +275,18 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle('composio:waitForConnection', async (_event, appId: string) => {
     if (!composioManager) return { success: false }
+    const waitFn = pendingConnections.get(appId)
+    if (!waitFn) return { success: false, error: 'No pending connection — call authorize first' }
     try {
-      const { waitForConnection } = await composioManager.authorizeApp(appId)
-      const connected = await waitForConnection(120000)
+      const connected = await waitFn(120000)
+      pendingConnections.delete(appId)
       if (connected) {
-        // Refresh the Composio MCP connection to pick up the new tool
+        // Refresh the Composio MCP connection to pick up the new toolkit
         await reconnectComposioMcp()
       }
       return { success: connected }
     } catch {
+      pendingConnections.delete(appId)
       return { success: false }
     }
   })
@@ -314,20 +333,33 @@ async function initComposio(): Promise<void> {
   await reconnectComposioMcp()
 }
 
-// Refresh the Composio HTTP MCP connection
-async function reconnectComposioMcp(): Promise<void> {
+// Mutex to prevent concurrent reconnect calls
+let reconnectPromise: Promise<void> = Promise.resolve()
+
+// Refresh the Composio HTTP MCP connection (serialized via mutex)
+function reconnectComposioMcp(): Promise<void> {
+  reconnectPromise = reconnectPromise.then(() => doReconnectComposioMcp())
+  return reconnectPromise
+}
+
+async function doReconnectComposioMcp(): Promise<void> {
   if (!composioManager) return
   try {
-    const mcpConfig = await composioManager.getMcpConfig()
+    // Only expose tools for apps the user has actually connected
+    const connectedApps = await composioManager.listConnectedApps()
+    const connectedAppIds = Object.entries(connectedApps).filter(([, v]) => v).map(([k]) => k)
 
-    // Update or add the Composio MCP server config in settings
-    const settings = store.getSettings()
-    const servers = (settings.mcpServers || []).filter(s => s.id !== COMPOSIO_MCP_SERVER_ID)
-    store.updateSettings({ mcpServers: [...servers, mcpConfig] })
+    // If no apps are connected, disconnect any existing Composio MCP session and stop
+    if (connectedAppIds.length === 0) {
+      await mcpManager.disconnect(COMPOSIO_MCP_SERVER_ID)
+      return
+    }
 
-    // Connect via MCPManager (HTTP transport)
+    const mcpConfig = await composioManager.getMcpConfig(connectedAppIds)
+
+    // Connect via MCPManager — do NOT persist to settings (config contains ephemeral session tokens)
     await mcpManager.connect(mcpConfig)
-    console.log('Composio MCP connected')
+    console.log(`Composio MCP connected with ${connectedAppIds.length} toolkit(s)`)
   } catch (err) {
     console.error('Failed to connect Composio MCP:', err)
   }

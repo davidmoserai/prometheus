@@ -570,10 +570,13 @@ export class EmployeeStore {
           }
           return defaultMcp
         }),
-        ...(saved.mcpServers || []).filter(s => !DEFAULT_MCP_SERVERS.find(d => d.id === s.id))
+        // Exclude Composio MCP config — it's ephemeral and rebuilt on each app launch
+      ...(saved.mcpServers || []).filter(s => !DEFAULT_MCP_SERVERS.find(d => d.id === s.id) && !s.isComposio)
       ]
     }
-    return merged
+    // Never expose the Composio API key to the renderer
+    const { composioApiKey: _stripped, ...safe } = merged as typeof merged & { composioApiKey?: string }
+    return safe
   }
 
   updateSettings(settings: Partial<AppSettings>): AppSettings {
