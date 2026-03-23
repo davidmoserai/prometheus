@@ -117,6 +117,10 @@ const api = {
     authStatus: () => ipcRenderer.invoke('claude-code:authStatus'),
     login: () => ipcRenderer.invoke('claude-code:login')
   },
+  memory: {
+    getWorkingMemory: (employeeId: string) => ipcRenderer.invoke('memory:getWorkingMemory', employeeId),
+    clearWorkingMemory: (employeeId: string) => ipcRenderer.invoke('memory:clearWorkingMemory', employeeId)
+  },
   mcp: {
     list: () => ipcRenderer.invoke('mcp:list'),
     add: (config: unknown) => ipcRenderer.invoke('mcp:add', config),
@@ -134,6 +138,9 @@ const api = {
     authorize: (appId: string) => ipcRenderer.invoke('composio:authorize', appId),
     waitForConnection: (appId: string) => ipcRenderer.invoke('composio:waitForConnection', appId),
     disconnect: (appId: string) => ipcRenderer.invoke('composio:disconnect', appId)
+  },
+  shell: {
+    openExternal: (url: string) => ipcRenderer.invoke('shell:openExternal', url)
   },
   updates: {
     onAvailable: (callback: () => void) => {

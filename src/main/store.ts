@@ -7,8 +7,6 @@ import {
   Department,
   Employee,
   KnowledgeDocument,
-  Conversation,
-  ChatMessage,
   ChatAttachment,
   Task,
   TaskMessage,
@@ -23,7 +21,6 @@ import {
 interface CompanyData {
   employees: Employee[]
   knowledge: KnowledgeDocument[]
-  conversations: Conversation[]
   departments: Department[]
   tasks: Task[]
   recurringTasks: RecurringTask[]
@@ -55,12 +52,12 @@ interface LegacyEmployee {
 interface LegacyStoreData {
   employees?: LegacyEmployee[]
   knowledge?: KnowledgeDocument[]
-  conversations?: Conversation[]
+  conversations?: any[] // Legacy — migrated to Mastra Memory
   settings?: AppSettings
 }
 
 function emptyCompanyData(): CompanyData {
-  return { employees: [], knowledge: [], conversations: [], departments: [], tasks: [], recurringTasks: [] }
+  return { employees: [], knowledge: [], departments: [], tasks: [], recurringTasks: [] }
 }
 
 export class EmployeeStore {
@@ -182,7 +179,6 @@ export class EmployeeStore {
         [companyId]: {
           employees,
           knowledge: legacy.knowledge || [],
-          conversations: legacy.conversations || [],
           departments: [],
           tasks: [],
           recurringTasks: []
@@ -435,55 +431,7 @@ export class EmployeeStore {
     return false
   }
 
-  // Conversations (scoped to active company)
-  listConversations(employeeId: string): Conversation[] {
-    return this.getActiveData().conversations.filter(c => c.employeeId === employeeId)
-  }
-
-  getConversation(id: string): Conversation | undefined {
-    return this.getActiveData().conversations.find(c => c.id === id)
-  }
-
-  createConversation(employeeId: string): Conversation {
-    const conv: Conversation = {
-      id: uuid(),
-      employeeId,
-      title: 'New conversation',
-      messages: [],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    }
-    this.getActiveData().conversations.push(conv)
-    this.save()
-    return conv
-  }
-
-  deleteConversation(id: string): boolean {
-    const data = this.getActiveData()
-    const before = data.conversations.length
-    data.conversations = data.conversations.filter(c => c.id !== id)
-    if (data.conversations.length < before) {
-      // Clean up uploaded files for this conversation
-      const filesDir = this.getConversationFilesDir(id)
-      if (existsSync(filesDir)) {
-        rmSync(filesDir, { recursive: true, force: true })
-      }
-      this.save()
-      return true
-    }
-    return false
-  }
-
-  // Find an existing agent-to-agent conversation between two employees
-  findAgentConversation(employeeId1: string, employeeId2: string): Conversation | null {
-    const conversations = this.getActiveData().conversations
-    return conversations.find(c =>
-      (c.employeeId === employeeId1 && c.peerEmployeeId === employeeId2) ||
-      (c.employeeId === employeeId2 && c.peerEmployeeId === employeeId1)
-    ) || null
-  }
-
-  // File upload support
+  // File upload support (conversations now stored in Mastra Memory, but files stay on filesystem)
   getConversationFilesDir(conversationId: string): string {
     const userDataPath = app.getPath('userData')
     return join(userDataPath, 'prometheus-data', 'files', conversationId)
@@ -515,31 +463,6 @@ export class EmployeeStore {
       mimetype: mimeMap[ext] || 'application/octet-stream',
       size: stats.size
     }
-  }
-
-  addMessage(conversationId: string, message: Omit<ChatMessage, 'id' | 'timestamp'>): ChatMessage {
-    const conv = this.getActiveData().conversations.find(c => c.id === conversationId)
-    if (!conv) throw new Error(`Conversation ${conversationId} not found`)
-    const msg: ChatMessage = {
-      ...message,
-      id: uuid(),
-      timestamp: new Date().toISOString()
-    }
-    conv.messages.push(msg)
-    conv.updatedAt = new Date().toISOString()
-    if (conv.messages.length === 1 && message.role === 'user') {
-      conv.title = message.content.slice(0, 60) + (message.content.length > 60 ? '...' : '')
-    }
-    this.save()
-    return msg
-  }
-
-  replaceMessages(conversationId: string, messages: ChatMessage[]): void {
-    const conv = this.getActiveData().conversations.find(c => c.id === conversationId)
-    if (!conv) return
-    conv.messages = messages
-    conv.updatedAt = new Date().toISOString()
-    this.save()
   }
 
   // Settings (global, not per-company)

@@ -1,10 +1,24 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Send, Plus, MessageSquare, ChevronLeft, ChevronDown, Users, ArrowRight, Trash2, Minimize2, FileText, Download, Paperclip, X, Brain, Terminal, Search, Globe, Edit3, Code, ShieldAlert, Check, XIcon } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useAppStore, type Conversation, type ChatMessage, type ChatAttachment, type StreamPart } from '@/stores/app-store'
+
+// Open links externally; used by both ReactMarkdown instances
+const markdownComponents = {
+  a: ({ href, children }: { href?: string; children: React.ReactNode }) => (
+    <a
+      href={href}
+      onClick={(e) => { e.preventDefault(); if (href) window.api?.shell?.openExternal(href) }}
+      className="text-flame-500 underline cursor-pointer"
+    >
+      {children}
+    </a>
+  )
+}
 
 export function ChatPage() {
   const {
@@ -28,7 +42,6 @@ export function ChatPage() {
   } = useAppStore()
 
   const [input, setInput] = useState('')
-  const [isSending, setIsSending] = useState(false)
   const [tokenCount, setTokenCount] = useState(0)
   const [isCompressing, setIsCompressing] = useState(false)
   const [isUserScrolledUp, setIsUserScrolledUp] = useState(false)
@@ -40,10 +53,12 @@ export function ChatPage() {
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const dropZoneRef = useRef<HTMLDivElement>(null)
 
+  const isSending = useAppStore(s => s.sendingConversationIds.has(selectedConversationId || ''))
   const selectedEmployee = employees.find((e) => e.id === selectedEmployeeId)
   const activeConversation = conversations.find((c) => c.id === selectedConversationId)
   const currentParts = selectedConversationId ? streamingParts[selectedConversationId] : undefined
   const hasStreamingContent = currentParts && currentParts.length > 0
+  const hasStreamingText = currentParts?.some(p => p.type === 'text') ?? false
 
   useEffect(() => {
     if (selectedEmployeeId) {
@@ -154,14 +169,9 @@ export function ChatPage() {
     }
     if (!convId) return
 
-    setIsSending(true)
     setExpandedToolCalls(new Set())
-    try {
-      await sendMessage(convId, msg)
-    } finally {
-      setIsSending(false)
-      inputRef.current?.focus()
-    }
+    await sendMessage(convId, msg)
+    inputRef.current?.focus()
   }
 
   const handleCompress = async () => {
@@ -403,39 +413,19 @@ export function ChatPage() {
               {activeConversation.messages.map((msg) => (
                 <MessageBubble key={msg.id} message={msg} employeeName={selectedEmployee?.name} employeeAvatar={selectedEmployee?.avatar} />
               ))}
-              {/* Thinking indicator — shows when waiting for response */}
-              {isSending && !hasStreamingContent && (
-                <div className="flex animate-fade-in" style={{ gap: '14px' }}>
-                  <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-bg-elevated text-sm shrink-0">
-                    {selectedEmployee?.avatar}
-                  </div>
-                  <div className="flex-1 max-w-2xl">
-                    <div className="rounded-2xl rounded-tl-lg bg-bg-elevated border border-border-default" style={{ padding: '12px 16px' }}>
-                      <div className="flex items-center" style={{ gap: '6px' }}>
-                        <div className="flex" style={{ gap: '4px' }}>
-                          <span className="w-2 h-2 rounded-full bg-text-tertiary" style={{ animation: 'pulse-dot 1.4s ease-in-out infinite', animationDelay: '0s' }} />
-                          <span className="w-2 h-2 rounded-full bg-text-tertiary" style={{ animation: 'pulse-dot 1.4s ease-in-out infinite', animationDelay: '0.2s' }} />
-                          <span className="w-2 h-2 rounded-full bg-text-tertiary" style={{ animation: 'pulse-dot 1.4s ease-in-out infinite', animationDelay: '0.4s' }} />
-                        </div>
-                        <span className="text-[13px] text-text-tertiary" style={{ marginLeft: '4px' }}>Thinking...</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-              {/* Unified streaming turn — text, tool calls, files all chronological */}
-              {hasStreamingContent && (
+              {/* Unified streaming turn — text, tool calls, files, approvals all chronological */}
+              {(hasStreamingContent || (isSending && !hasStreamingText)) && (
                 <div className="flex animate-fade-in" style={{ gap: '14px' }}>
                   <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-bg-elevated text-sm shrink-0" style={{ marginTop: '2px' }}>
                     {selectedEmployee?.avatar}
                   </div>
                   <div className="flex-1 max-w-2xl flex flex-col" style={{ gap: '6px' }}>
-                    {currentParts!.map((part, i) => {
+                    {(currentParts ?? []).map((part, i) => {
                       if (part.type === 'text') {
                         return (
                           <div key={`text-${i}`} className="rounded-2xl rounded-tl-lg bg-bg-elevated border border-border-default" style={{ padding: '12px 16px' }}>
                             <div className="chat-markdown">
-                              <ReactMarkdown>{part.content}</ReactMarkdown>
+                              <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{part.content}</ReactMarkdown>
                             </div>
                           </div>
                         )
@@ -578,6 +568,18 @@ export function ChatPage() {
                       }
                       return null
                     })}
+                    {/* Inline thinking dots — shown when agent is working but no text yet */}
+                    {isSending && !hasStreamingText && (
+                      <div className="rounded-2xl rounded-tl-lg bg-bg-elevated border border-border-default" style={{ padding: '12px 16px' }}>
+                        <div className="flex items-center" style={{ gap: '6px' }}>
+                          <div className="flex" style={{ gap: '4px' }}>
+                            <span className="w-2 h-2 rounded-full bg-text-tertiary" style={{ animation: 'pulse-dot 1.4s ease-in-out infinite', animationDelay: '0s' }} />
+                            <span className="w-2 h-2 rounded-full bg-text-tertiary" style={{ animation: 'pulse-dot 1.4s ease-in-out infinite', animationDelay: '0.2s' }} />
+                            <span className="w-2 h-2 rounded-full bg-text-tertiary" style={{ animation: 'pulse-dot 1.4s ease-in-out infinite', animationDelay: '0.4s' }} />
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -752,7 +754,7 @@ function MessageBubble({
           }`} style={{ padding: '12px 16px' }}>
             {displayContent && (
               <div className="chat-markdown">
-                <ReactMarkdown>{displayContent}</ReactMarkdown>
+                <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{displayContent}</ReactMarkdown>
               </div>
             )}
             {/* Inline image attachments */}

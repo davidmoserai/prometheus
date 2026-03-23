@@ -1,8 +1,9 @@
 import { spawn, execSync, ChildProcess } from 'child_process'
 import { TOOL_IDS } from './types'
-import { writeFileSync, unlinkSync } from 'fs'
+import { writeFileSync, unlinkSync, mkdirSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
+import { mkdtempSync } from 'fs'
 
 // ============================================================
 // Types for Claude Code stream-json output
@@ -136,7 +137,7 @@ export function launchLogin(): Promise<ClaudeAuthStatus> {
 // Tool mapping: Prometheus builtin tools -> Claude Code tools
 // ============================================================
 
-const TOOL_MAP: Record<string, string[]> = {
+export const TOOL_MAP: Record<string, string[]> = {
   [TOOL_IDS.WEB_SEARCH]: ['WebSearch'],
   [TOOL_IDS.WEB_BROWSE]: ['WebFetch'],
   [TOOL_IDS.READ_FILE]: ['Read', 'Glob', 'Grep'],
@@ -196,7 +197,18 @@ export interface RunOptions {
   model: string
   enabledToolIds: string[]
   mcpServers?: { id: string; command: string; args: string[]; env?: Record<string, string> }[]
+  mcpToolNames?: string[]
   conversationHistory?: { role: string; content: string }[]
+  approvalServerPort?: number    // if set, inject PreToolUse hook into subprocess CWD
+  /**
+   * ⚠️  CLAUDE CODE ONLY — internal MCP server for memory + knowledge tools.
+   * Mastra agents use native createTool() functions instead (see agent-manager.ts).
+   * When set, a prometheus-internal MCP server script is written to the temp dir
+   * and registered in --mcp-config so Claude Code can call memory/knowledge APIs.
+   */
+  internalServerPort?: number
+  internalEmployeeId?: string
+  internalConversationId?: string
   onStream: (text: string) => void
   onToolCall?: (data: { tool: string; summary: string; detail?: string }) => void
   onFileWritten?: (data: { path: string; content: string }) => void
@@ -206,6 +218,145 @@ export interface RunOptions {
  * Run a Claude Code CLI subprocess and stream the response.
  * Returns the final accumulated text.
  */
+// ============================================================
+// Internal MCP server script (Claude Code only)
+// ============================================================
+
+/**
+ * ⚠️  CLAUDE CODE ONLY ⚠️
+ * Writes a self-contained Node.js MCP server script to tempDir.
+ * This script bridges Claude Code's MCP protocol to the Prometheus internal HTTP API
+ * (prometheus-internal-server.ts), giving Claude Code access to memory + knowledge tools.
+ *
+ * Mastra agents do NOT use this — they get the same tools as native createTool() functions.
+ */
+function writeInternalMcpScript(tempDir: string, port: number, employeeId: string, conversationId: string): string {
+  const scriptPath = join(tempDir, 'prometheus-internal-mcp.js')
+
+  // Inline MCP server script — implements JSON-RPC 2.0 over stdio (MCP protocol)
+  const script = `
+const http = require('http')
+const readline = require('readline')
+const PORT = ${port}
+const EMPLOYEE_ID = ${JSON.stringify(employeeId)}
+const CONVERSATION_ID = ${JSON.stringify(conversationId)}
+
+const TOOLS = [
+  {
+    name: 'update_working_memory',
+    description: 'Update your persistent working memory. Use this to remember facts about the user, preferences, decisions, and anything you want to recall in future conversations. Replaces previous memory content.',
+    inputSchema: { type: 'object', properties: { content: { type: 'string', description: 'Your full updated working memory (replaces previous).' } }, required: ['content'] }
+  },
+  {
+    name: 'search_memory',
+    description: 'Search your past conversations and memories using semantic similarity. Use this to recall something from a previous conversation.',
+    inputSchema: { type: 'object', properties: { query: { type: 'string', description: 'What to search for in past conversations.' } }, required: ['query'] }
+  },
+  {
+    name: 'create_knowledge_doc',
+    description: 'Create a new persistent knowledge document that you and other employees can reference.',
+    inputSchema: { type: 'object', properties: { title: { type: 'string' }, content: { type: 'string' }, tags: { type: 'array', items: { type: 'string' } } }, required: ['title', 'content'] }
+  },
+  {
+    name: 'update_knowledge_doc',
+    description: 'Update an existing knowledge document by its ID.',
+    inputSchema: { type: 'object', properties: { doc_id: { type: 'string', description: 'ID of the document to update.' }, content: { type: 'string', description: 'New content.' } }, required: ['doc_id', 'content'] }
+  }
+]
+
+const URL_MAP = {
+  update_working_memory: '/memory/update',
+  search_memory: '/memory/search',
+  create_knowledge_doc: '/knowledge/create',
+  update_knowledge_doc: '/knowledge/update'
+}
+
+function post(path, body) {
+  return new Promise((resolve, reject) => {
+    const str = JSON.stringify(body)
+    const req = http.request({ hostname: '127.0.0.1', port: PORT, path, method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(str) }
+    }, res => { let d = ''; res.on('data', c => d += c); res.on('end', () => { try { resolve(JSON.parse(d)) } catch { resolve({ result: d }) } }) })
+    req.on('error', reject); req.write(str); req.end()
+  })
+}
+
+function reply(id, result) { process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, result }) + '\\n') }
+function replyErr(id, msg) { process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, error: { code: -32603, message: msg } }) + '\\n') }
+
+readline.createInterface({ input: process.stdin, terminal: false }).on('line', async line => {
+  let msg; try { msg = JSON.parse(line) } catch { return }
+  const { id, method, params } = msg
+  if (method === 'initialize') {
+    reply(id, { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'prometheus-internal', version: '1.0' } })
+  } else if (method === 'notifications/initialized') {
+    // no response
+  } else if (method === 'tools/list') {
+    reply(id, { tools: TOOLS })
+  } else if (method === 'tools/call') {
+    const { name, arguments: args } = params
+    const path = URL_MAP[name]
+    if (!path) { replyErr(id, 'Unknown tool: ' + name); return }
+    try {
+      const res = await post(path, { ...args, employeeId: EMPLOYEE_ID, conversationId: CONVERSATION_ID })
+      reply(id, { content: [{ type: 'text', text: res.result || JSON.stringify(res) }] })
+    } catch (err) { replyErr(id, String(err)) }
+  } else {
+    process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, error: { code: -32601, message: 'Method not found' } }) + '\\n')
+  }
+})
+`
+  writeFileSync(scriptPath, script)
+  return scriptPath
+}
+
+/** Write a temp directory with hook.js and .claude/settings.local.json for PreToolUse approval */
+function writeTempHookDir(approvalServerPort: number): string {
+  const tempDir = mkdtempSync(join(tmpdir(), 'prometheus-cc-'))
+
+  // Hook script: reads tool JSON from stdin, POSTs to approval server, exits 0 or 2
+  const hookScript = `const http = require('http'), port = +process.env.PROMETHEUS_APPROVAL_PORT
+let data = ''
+process.stdin.on('data', c => { data += c })
+process.stdin.on('end', () => {
+  try {
+    const parsed = JSON.parse(data)
+    const body = JSON.stringify({ tool_name: parsed.tool_name, tool_input: parsed.tool_input || {} })
+    const req = http.request(
+      { hostname: '127.0.0.1', port, path: '/hook', method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } },
+      (res) => {
+        let r = ''
+        res.on('data', c => { r += c })
+        res.on('end', () => {
+          try { process.exit(JSON.parse(r).approved ? 0 : 2) } catch { process.exit(0) }
+        })
+      }
+    )
+    req.on('error', () => process.exit(0))
+    req.write(body)
+    req.end()
+  } catch { process.exit(0) }
+})
+`
+  const hookPath = join(tempDir, 'hook.js')
+  writeFileSync(hookPath, hookScript)
+
+  // Settings with PreToolUse hook pointing to our script, 310s timeout (covers 5-min approval window)
+  const settings = {
+    hooks: {
+      PreToolUse: [{
+        matcher: '.*',
+        hooks: [{ type: 'command', command: `node ${hookPath}`, timeout: 310 }]
+      }]
+    }
+  }
+  mkdirSync(join(tempDir, '.claude'))
+  writeFileSync(join(tempDir, '.claude', 'settings.local.json'), JSON.stringify(settings, null, 2))
+
+  return tempDir
+}
+
 export function runClaudeCode(options: RunOptions): { promise: Promise<string>; abort: () => void } {
   const {
     prompt,
@@ -213,7 +364,12 @@ export function runClaudeCode(options: RunOptions): { promise: Promise<string>; 
     model,
     enabledToolIds,
     mcpServers,
+    mcpToolNames,
     conversationHistory,
+    approvalServerPort,
+    internalServerPort,
+    internalEmployeeId,
+    internalConversationId,
     onStream,
     onToolCall,
     onFileWritten
@@ -221,6 +377,7 @@ export function runClaudeCode(options: RunOptions): { promise: Promise<string>; 
 
   let child: ChildProcess | null = null
   let tempMcpPath: string | null = null
+  let tempHookDir: string | null = null
 
   const abort = () => {
     if (child && !child.killed) {
@@ -240,9 +397,24 @@ export function runClaudeCode(options: RunOptions): { promise: Promise<string>; 
       '--dangerously-skip-permissions'
     ]
 
-    // Map employee's enabled tools to Claude Code built-in tool names
-    // Only these tools will be available — everything else is blocked
-    const ccTools = mapToolsForCLI(enabledToolIds)
+    // Map employee's enabled builtin tools to Claude Code tool names, plus any MCP tool names.
+    // MCP tool names must be in --tools so Claude Code allows them (it's a strict allowlist).
+    // The resolved command in --mcp-config ensures the MCP server starts correctly.
+    //
+    // ⚠️  CLAUDE CODE ONLY: internal memory/knowledge tools exposed via prometheus-internal MCP.
+    // Mastra agents get the same capabilities via native createTool() functions (no MCP needed).
+    const internalMcpToolNames = internalServerPort ? [
+      'mcp__prometheus-internal__update_working_memory',
+      'mcp__prometheus-internal__search_memory',
+      'mcp__prometheus-internal__create_knowledge_doc',
+      'mcp__prometheus-internal__update_knowledge_doc'
+    ] : []
+
+    const ccTools = [
+      ...mapToolsForCLI(enabledToolIds),
+      ...(mcpToolNames || []),
+      ...internalMcpToolNames
+    ]
     if (ccTools.length > 0) {
       args.push('--tools', ccTools.join(','))
     } else {
@@ -253,15 +425,21 @@ export function runClaudeCode(options: RunOptions): { promise: Promise<string>; 
     // Block user's personal MCP servers — only use what we explicitly provide
     args.push('--strict-mcp-config')
 
-    // MCP servers (only employee's assigned ones)
-    if (mcpServers && mcpServers.length > 0) {
-      tempMcpPath = writeTempMcpConfig(mcpServers)
-      args.push('--mcp-config', tempMcpPath)
-    } else {
-      // Even with no MCP servers, we need --mcp-config for --strict-mcp-config to work
-      tempMcpPath = writeTempMcpConfig([])
-      args.push('--mcp-config', tempMcpPath)
+    // ⚠️  CLAUDE CODE ONLY: build MCP config including prometheus-internal server (if port set).
+    // The internal server bridges Claude Code to our memory/knowledge HTTP API.
+    // Mastra agents never touch this code path.
+    const allMcpServers = [...(mcpServers || [])]
+    let internalMcpScriptPath: string | null = null
+    if (internalServerPort && internalEmployeeId && internalConversationId) {
+      // Write internal MCP script to a temp dir (reuse hookDir if available, else create one)
+      const scriptDir = tempHookDir || mkdtempSync(join(tmpdir(), 'prometheus-cc-'))
+      if (!tempHookDir) tempHookDir = scriptDir
+      internalMcpScriptPath = writeInternalMcpScript(scriptDir, internalServerPort, internalEmployeeId, internalConversationId)
+      allMcpServers.push({ id: 'prometheus-internal', command: 'node', args: [internalMcpScriptPath] })
     }
+
+    tempMcpPath = writeTempMcpConfig(allMcpServers)
+    args.push('--mcp-config', tempMcpPath)
 
     // Build the full prompt with conversation history prepended
     let fullPrompt = ''
@@ -275,11 +453,21 @@ export function runClaudeCode(options: RunOptions): { promise: Promise<string>; 
     }
     fullPrompt += prompt
 
+    // Set up temp hook dir if approval server is configured
+    const spawnEnv = cleanEnv()
+    let spawnCwd: string | undefined
+    if (approvalServerPort) {
+      tempHookDir = writeTempHookDir(approvalServerPort)
+      spawnEnv.PROMETHEUS_APPROVAL_PORT = String(approvalServerPort)
+      spawnCwd = tempHookDir
+    }
+
     // Spawn the process — pipe prompt via stdin (more reliable than positional arg from Electron)
     child = spawn(getClaudeBin(), args, {
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: cleanEnv(),
-      shell: false
+      env: spawnEnv,
+      shell: false,
+      ...(spawnCwd ? { cwd: spawnCwd } : {})
     })
 
     // Write prompt to stdin and close it
@@ -372,9 +560,12 @@ export function runClaudeCode(options: RunOptions): { promise: Promise<string>; 
     })
 
     child.on('close', (code) => {
-      // Clean up temp MCP config
+      // Clean up temp MCP config and hook dir
       if (tempMcpPath) {
         try { unlinkSync(tempMcpPath) } catch {}
+      }
+      if (tempHookDir) {
+        try { rmSync(tempHookDir, { recursive: true, force: true }) } catch {}
       }
 
       // Process any remaining buffer
@@ -395,6 +586,9 @@ export function runClaudeCode(options: RunOptions): { promise: Promise<string>; 
     child.on('error', (err) => {
       if (tempMcpPath) {
         try { unlinkSync(tempMcpPath) } catch {}
+      }
+      if (tempHookDir) {
+        try { rmSync(tempHookDir, { recursive: true, force: true }) } catch {}
       }
       reject(new Error(`Failed to spawn Claude Code: ${err.message}`))
     })

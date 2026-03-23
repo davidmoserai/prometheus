@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
 import { ContactAccessEditor } from './contact-access-editor'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useAppStore, type Employee, type ToolAssignment, type PermissionSet, type ContactAccess } from '@/stores/app-store'
 import { INTEGRATION_CATALOG_BY_ID } from '../../../../main/integration-catalog'
 
@@ -337,6 +338,20 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
   const [creatingDept, setCreatingDept] = useState(false)
   const [newDeptName, setNewDeptName] = useState('')
   const [memoryText, setMemoryText] = useState(employee?.memory || '')
+  const [loadingMemory, setLoadingMemory] = useState(false)
+  const [clearMemoryConfirmOpen, setClearMemoryConfirmOpen] = useState(false)
+
+  // Load working memory from Mastra when editing
+  useEffect(() => {
+    if (!isEditing || !employee) return
+    setLoadingMemory(true)
+    window.api.memory?.getWorkingMemory(employee.id)
+      .then((wm: string | null) => {
+        if (wm !== null) setMemoryText(wm)
+      })
+      .catch(() => { /* fallback to employee.memory already in state */ })
+      .finally(() => setLoadingMemory(false))
+  }, [isEditing, employee?.id])
   const [activeTab, setActiveTab] = useState<'basic' | 'tools' | 'knowledge' | 'permissions'>('basic')
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({})
 
@@ -703,55 +718,54 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
                 </CardContent>
               </Card>
 
-              {/* Memory (editable, only shown when editing) */}
+              {/* Working Memory (read-only, only shown when editing) */}
               {isEditing && (
                 <Card>
                   <CardHeader>
                     <CardTitle className="flex items-center" style={{ gap: '8px' }}>
                       <Brain className="w-4 h-4 text-flame-400 drop-shadow-[0_0_6px_rgba(249,115,22,0.4)]" />
-                      Persistent Memory
+                      Working Memory
                     </CardTitle>
                     <CardDescription>
-                      Long-term memory that persists across conversations. Agents update this automatically, but you can edit it too.
+                      The agent's persistent memory across conversations. Updated automatically by the agent using the <code className="text-[11px] bg-bg-tertiary rounded px-1">update_working_memory</code> tool. Use <code className="text-[11px] bg-bg-tertiary rounded px-1">search_memory</code> to search past conversations.
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
                     <div className="flex flex-col" style={{ gap: '12px' }}>
                       <Textarea
-                        value={memoryText}
-                        onChange={(e) => setMemoryText(e.target.value)}
+                        value={loadingMemory ? 'Loading...' : memoryText}
+                        readOnly
                         rows={6}
-                        placeholder="No memories yet. The agent will save important facts here during conversations, or you can add context manually."
-                        className="font-mono text-[13px]"
+                        disabled={loadingMemory}
+                        placeholder="No working memory yet. The agent will populate this during conversations."
+                        className="font-mono text-[13px] opacity-80"
                       />
-                      <div className="flex justify-between">
-                        {memoryText !== (employee?.memory || '') && (
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={async () => {
-                              await updateEmployee(employee!.id, { memory: memoryText })
-                            }}
-                          >
-                            <Save className="w-3.5 h-3.5" />
-                            Save Memory
-                          </Button>
-                        )}
+                      <div className="flex justify-end">
                         {memoryText && (
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={async () => {
-                              await updateEmployee(employee!.id, { memory: '' })
-                              setMemoryText('')
-                            }}
-                            className="text-red-400 hover:text-red-300 hover:bg-red-500/10 ml-auto"
+                            onClick={() => setClearMemoryConfirmOpen(true)}
+                            className="text-red-400 hover:text-red-300 hover:bg-red-500/10"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
-                            Clear
+                            Clear Memory
                           </Button>
                         )}
                       </div>
+                      <ConfirmDialog
+                        open={clearMemoryConfirmOpen}
+                        title="Clear working memory?"
+                        description="This will permanently erase the agent's working memory. This cannot be undone."
+                        confirmLabel="Clear"
+                        variant="destructive"
+                        onConfirm={async () => {
+                          await window.api.memory?.clearWorkingMemory(employee!.id)
+                          setMemoryText('')
+                          setClearMemoryConfirmOpen(false)
+                        }}
+                        onCancel={() => setClearMemoryConfirmOpen(false)}
+                      />
                     </div>
                   </CardContent>
                 </Card>
@@ -816,7 +830,7 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
                                   </div>
                                   {tool.enabled && (
                                     <div className="flex items-center" style={{ gap: '8px' }}>
-                                      <span className="text-[11px] text-text-tertiary">Approval</span>
+                                      <span className="text-[11px] text-text-tertiary">Requires Approval</span>
                                       <Switch
                                         checked={tool.requiresApproval}
                                         onCheckedChange={() => toggleToolApproval(tool.id)}
@@ -853,6 +867,8 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
                       })
 
                       const enabledCount = mcpToolAssignments.filter(t => t.enabled).length
+                      const enabledTools = mcpToolAssignments.filter(t => t.enabled)
+                      const allEnabledRequireApproval = enabledTools.length > 0 && enabledTools.every(t => t.requiresApproval)
 
                       const toggleMcpTool = (toolId: string) => {
                         const existing = tools.find(t => t.id === toolId)
@@ -896,31 +912,51 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
                                 {server.isComposio ? '🔗 Integrations' : server.name}
                               </span>
                             </div>
-                            <div className="flex items-center" style={{ gap: '10px' }}>
-                              <Badge variant="secondary">{enabledCount}/{mcpToolAssignments.length} enabled</Badge>
-                              <div onClick={(e) => e.stopPropagation()}>
-                                <Switch
-                                  checked={enabledCount === mcpToolAssignments.length && mcpToolAssignments.length > 0}
-                                  onCheckedChange={(checked) => {
-                                    const updatedTools = [...tools]
-                                    for (const mTool of mcpToolAssignments) {
-                                      const idx = updatedTools.findIndex(t => t.id === mTool.id)
-                                      if (idx >= 0) {
-                                        updatedTools[idx] = { ...updatedTools[idx], enabled: checked }
-                                      } else if (checked) {
-                                        updatedTools.push({ ...mTool, enabled: true })
-                                      }
-                                    }
-                                    setTools(updatedTools)
-                                  }}
-                                />
-                              </div>
-                            </div>
+                            <Badge variant="secondary">{enabledCount}/{mcpToolAssignments.length} enabled</Badge>
                           </button>
 
                           {/* Tool list */}
                           {!isCollapsed && (
                             <div className="flex flex-col" style={{ gap: '2px', padding: '4px' }}>
+                              {/* Column headers with bulk toggles */}
+                              <div className="flex items-center justify-between" style={{ padding: '8px 12px 4px' }}>
+                                <div className="flex items-center" style={{ gap: '10px' }}>
+                                  <Switch
+                                    checked={enabledCount === mcpToolAssignments.length && mcpToolAssignments.length > 0}
+                                    onCheckedChange={(checked) => {
+                                      const updatedTools = [...tools]
+                                      for (const mTool of mcpToolAssignments) {
+                                        const idx = updatedTools.findIndex(t => t.id === mTool.id)
+                                        if (idx >= 0) {
+                                          updatedTools[idx] = { ...updatedTools[idx], enabled: checked }
+                                        } else if (checked) {
+                                          updatedTools.push({ ...mTool, enabled: true })
+                                        }
+                                      }
+                                      setTools(updatedTools)
+                                    }}
+                                  />
+                                  <span className="text-[11px] font-semibold text-text-tertiary uppercase tracking-wide">Activate All</span>
+                                </div>
+                                {enabledTools.length > 0 && (
+                                  <div className="flex items-center" style={{ gap: '8px' }}>
+                                    <span className="text-[11px] font-semibold text-text-tertiary uppercase tracking-wide">Require Approval</span>
+                                    <Switch
+                                      checked={allEnabledRequireApproval}
+                                      onCheckedChange={(checked) => {
+                                        const updatedTools = [...tools]
+                                        for (const mTool of enabledTools) {
+                                          const idx = updatedTools.findIndex(t => t.id === mTool.id)
+                                          if (idx >= 0) {
+                                            updatedTools[idx] = { ...updatedTools[idx], requiresApproval: checked }
+                                          }
+                                        }
+                                        setTools(updatedTools)
+                                      }}
+                                    />
+                                  </div>
+                                )}
+                              </div>
                               {mcpToolAssignments.map((tool) => (
                                 <div
                                   key={tool.id}
@@ -940,7 +976,7 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
                                   </div>
                                   {tool.enabled && (
                                     <div className="flex items-center" style={{ gap: '8px' }}>
-                                      <span className="text-[11px] text-text-tertiary">Approval</span>
+                                      <span className="text-[11px] text-text-tertiary">Requires Approval</span>
                                       <Switch
                                         checked={tool.requiresApproval}
                                         onCheckedChange={() => toggleMcpToolApproval(tool.id)}

@@ -7,8 +7,10 @@ import { MCPManager } from './mcp-manager'
 import { ComposioManager, COMPOSIO_MCP_SERVER_ID } from './composio-manager'
 import { INTEGRATION_CATALOG } from './integration-catalog'
 import { Scheduler } from './scheduler'
+import { ConversationService } from './conversation-service'
 import type { MCPServerConfig } from './types'
 import { isClaudeCodeInstalled, getAuthStatus, launchLogin } from './claude-code-runner'
+import { initMemory, getMemory } from './memory'
 
 let mainWindow: BrowserWindow | null = null
 let store: EmployeeStore
@@ -16,6 +18,7 @@ let mcpManager: MCPManager
 let composioManager: ComposioManager | null = null
 let agentManager: AgentManager
 let scheduler: Scheduler
+let convService: ConversationService
 
 // Stores pending OAuth waitForConnection callbacks keyed by appId
 const pendingConnections = new Map<string, (timeoutMs?: number) => Promise<boolean>>()
@@ -59,6 +62,21 @@ function registerIpcHandlers(): void {
     store.setActiveCompany(id)
     // Re-init Composio with the new company's userId so OAuth tokens are scoped correctly
     await initComposio()
+    // Migrate legacy memory for employees in the newly active company
+    try {
+      const mem = getMemory()
+      for (const emp of store.listEmployees()) {
+        if (emp.memory) {
+          try {
+            const existing = await mem.getWorkingMemory({ threadId: `employee-${emp.id}`, resourceId: emp.id })
+            if (!existing) {
+              await mem.updateWorkingMemory({ threadId: `employee-${emp.id}`, resourceId: emp.id, workingMemory: emp.memory })
+              store.updateEmployee(emp.id, { memory: '' })
+            }
+          } catch { /* skip */ }
+        }
+      }
+    } catch { /* memory unavailable */ }
   })
   ipcMain.handle('companies:create', (_event, data) => store.createCompany(data))
   ipcMain.handle('companies:update', (_event, id: string, data) => store.updateCompany(id, data))
@@ -87,11 +105,19 @@ function registerIpcHandlers(): void {
   ipcMain.handle('knowledge:update', (_event, id: string, data) => store.updateKnowledge(id, data))
   ipcMain.handle('knowledge:delete', (_event, id: string) => store.deleteKnowledge(id))
 
-  // Conversation IPC Handlers
-  ipcMain.handle('conversations:list', (_event, employeeId: string) => store.listConversations(employeeId))
-  ipcMain.handle('conversations:get', (_event, id: string) => store.getConversation(id))
-  ipcMain.handle('conversations:create', (_event, employeeId: string) => store.createConversation(employeeId))
-  ipcMain.handle('conversations:delete', (_event, id: string) => store.deleteConversation(id))
+  // Conversation IPC Handlers (backed by Mastra Memory)
+  ipcMain.handle('conversations:list', async (_event, employeeId: string) => {
+    const companyId = store.getActiveCompanyId()
+    if (!companyId) return []
+    return convService.listConversations(employeeId, companyId)
+  })
+  ipcMain.handle('conversations:get', (_event, id: string) => convService.getConversation(id))
+  ipcMain.handle('conversations:create', async (_event, employeeId: string) => {
+    const companyId = store.getActiveCompanyId()
+    if (!companyId) throw new Error('No active company')
+    return convService.createConversation(employeeId, companyId)
+  })
+  ipcMain.handle('conversations:delete', (_event, id: string) => convService.deleteConversation(id))
 
   // Task IPC Handlers
   ipcMain.handle('tasks:list', () => store.listTasks())
@@ -130,7 +156,24 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle('chat:compress', async (_event, conversationId: string) => {
     await agentManager.compressConversation(conversationId)
-    return store.getConversation(conversationId)
+    return convService.getConversation(conversationId)
+  })
+
+  // Memory IPC Handlers
+  ipcMain.handle('memory:getWorkingMemory', async (_event, employeeId: string) => {
+    try {
+      const mem = getMemory()
+      return await mem.getWorkingMemory({ threadId: `employee-${employeeId}`, resourceId: employeeId })
+    } catch {
+      return null
+    }
+  })
+
+  ipcMain.handle('memory:clearWorkingMemory', async (_event, employeeId: string) => {
+    try {
+      const mem = getMemory()
+      await mem.updateWorkingMemory({ threadId: `employee-${employeeId}`, resourceId: employeeId, workingMemory: '' })
+    } catch { /* ignore */ }
   })
 
   // Recurring Tasks IPC Handlers
@@ -158,7 +201,12 @@ function registerIpcHandlers(): void {
 
   // Settings IPC Handlers
   ipcMain.handle('settings:get', () => store.getSettings())
-  ipcMain.handle('settings:update', (_event, settings) => store.updateSettings(settings))
+  ipcMain.handle('settings:update', (_event, settings) => {
+    const result = store.updateSettings(settings)
+    // Re-init memory when providers change (API keys may have been added/rotated)
+    try { initMemory(settings.providers) } catch { /* keep existing instance */ }
+    return result
+  })
 
   // MCP Server IPC Handlers
   ipcMain.handle('mcp:list', () => {
@@ -326,6 +374,9 @@ function registerIpcHandlers(): void {
   ipcMain.handle('update:install', () => {
     autoUpdater.quitAndInstall()
   })
+
+  // Open URLs in the system default browser
+  ipcMain.handle('shell:openExternal', (_, url: string) => shell.openExternal(url))
 }
 
 // Initialize or reinitialize Composio and connect its MCP session
@@ -372,14 +423,37 @@ async function doReconnectComposioMcp(): Promise<void> {
   }
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   // Initialize store after app is ready (needs app.getPath)
   store = new EmployeeStore()
   mcpManager = new MCPManager()
-  agentManager = new AgentManager(store, mcpManager)
 
-  // Connect to configured MCP servers on startup
+  // Initialize Mastra memory (required — conversations are stored in LibSQL)
   const settings = store.getSettings()
+  const memory = initMemory(settings.providers)
+  convService = new ConversationService()
+
+  // Migrate legacy employee.memory strings → Mastra working memory (one-time)
+  for (const emp of store.listEmployees()) {
+    if (emp.memory) {
+      try {
+        const existing = await memory.getWorkingMemory({ threadId: `employee-${emp.id}`, resourceId: emp.id })
+        if (!existing) {
+          await memory.updateWorkingMemory({
+            threadId: `employee-${emp.id}`,
+            resourceId: emp.id,
+            workingMemory: emp.memory,
+          })
+          store.updateEmployee(emp.id, { memory: '' })
+        }
+      } catch (err) {
+        console.error(`Failed to migrate memory for employee ${emp.id}:`, err)
+      }
+    }
+  }
+
+  agentManager = new AgentManager(store, mcpManager, convService)
+  // Connect only non-Composio MCP servers on startup (Composio connects separately)
   const customServers = (settings.mcpServers || []).filter(s => !s.isComposio)
   if (customServers.length > 0) {
     mcpManager.connectAll(customServers).catch(err => {
@@ -435,7 +509,7 @@ app.whenReady().then(() => {
   })
 
   // Initialize and start the scheduler
-  scheduler = new Scheduler(store, agentManager)
+  scheduler = new Scheduler(store, agentManager, convService)
   scheduler.setTaskRunCallback((recurringTask) => {
     mainWindow?.webContents.send('recurringTask:executed', recurringTask)
 
