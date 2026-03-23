@@ -198,6 +198,7 @@ export interface RunOptions {
   conversationHistory?: { role: string; content: string }[]
   onStream: (text: string) => void
   onToolCall?: (data: { tool: string; summary: string; detail?: string }) => void
+  onFileWritten?: (data: { path: string; content: string }) => void
 }
 
 /**
@@ -213,7 +214,8 @@ export function runClaudeCode(options: RunOptions): { promise: Promise<string>; 
     mcpServers,
     conversationHistory,
     onStream,
-    onToolCall
+    onToolCall,
+    onFileWritten
   } = options
 
   let child: ChildProcess | null = null
@@ -317,21 +319,28 @@ export function runClaudeCode(options: RunOptions): { promise: Promise<string>; 
           }
 
           // Detect tool use blocks
-          if (onToolCall) {
-            for (const block of content) {
-              if (block.type === 'tool_use') {
-                const toolBlock = block as unknown as { name?: string; input?: Record<string, unknown> }
-                const toolName = toolBlock.name || 'unknown'
-                // Short summary: just the tool name + key param (e.g. file path)
-                let summary = toolName
-                if (toolBlock.input) {
-                  const firstVal = Object.values(toolBlock.input)[0]
-                  if (typeof firstVal === 'string' && firstVal.length < 80) {
-                    summary = `${toolName}: ${firstVal}`
-                  }
+          for (const block of content) {
+            if (block.type === 'tool_use') {
+              const toolBlock = block as unknown as { name?: string; input?: Record<string, unknown> }
+              const toolName = toolBlock.name || 'unknown'
+              // Short summary: just the tool name + key param (e.g. file path)
+              let summary = toolName
+              if (toolBlock.input) {
+                const firstVal = Object.values(toolBlock.input)[0]
+                if (typeof firstVal === 'string' && firstVal.length < 80) {
+                  summary = `${toolName}: ${firstVal}`
                 }
-                const detail = toolBlock.input ? JSON.stringify(toolBlock.input, null, 2) : undefined
-                onToolCall({ tool: toolName, summary, detail })
+              }
+              const detail = toolBlock.input ? JSON.stringify(toolBlock.input, null, 2) : undefined
+              onToolCall?.({ tool: toolName, summary, detail })
+
+              // Detect file writes from Claude Code's built-in Write tool
+              if ((toolName === 'Write' || toolName === 'write_file') && toolBlock.input) {
+                const filePath = (toolBlock.input.file_path || toolBlock.input.path) as string | undefined
+                const fileContent = (toolBlock.input.content || '') as string
+                if (filePath && onFileWritten) {
+                  onFileWritten({ path: filePath, content: fileContent })
+                }
               }
             }
           }

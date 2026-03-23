@@ -402,6 +402,8 @@ export class AgentManager {
   private onTaskUpdate?: (task: Task) => void
   private onFileWritten?: (data: { conversationId: string; path: string; content: string }) => void
   private onToolCall?: (data: { conversationId: string; tool: string; summary: string; detail?: string }) => void
+  private onApprovalRequest?: (data: { conversationId: string; approvalId: string; tool: string; args: Record<string, unknown>; summary: string }) => void
+  private pendingApprovals: Map<string, { resolve: (approved: boolean) => void; timer: ReturnType<typeof setTimeout> }> = new Map()
 
   constructor(store: EmployeeStore, mcpManager?: MCPManager) {
     this.store = store
@@ -421,6 +423,30 @@ export class AgentManager {
   /** Set callback for notifying frontend when a tool is called */
   setToolCallCallback(cb: (data: { conversationId: string; tool: string; summary: string; detail?: string }) => void) {
     this.onToolCall = cb
+  }
+
+  /** Set callback for requesting tool approval from the user */
+  setApprovalRequestCallback(cb: (data: { conversationId: string; approvalId: string; tool: string; args: Record<string, unknown>; summary: string }) => void) {
+    this.onApprovalRequest = cb
+  }
+
+  /** Respond to a pending tool approval */
+  respondToApproval(approvalId: string, approved: boolean) {
+    const pending = this.pendingApprovals.get(approvalId)
+    if (pending) {
+      clearTimeout(pending.timer)
+      pending.resolve(approved)
+      this.pendingApprovals.delete(approvalId)
+    }
+  }
+
+  /** Cancel all pending approvals (e.g. on app quit) */
+  cancelAllPendingApprovals() {
+    for (const [id, pending] of this.pendingApprovals) {
+      clearTimeout(pending.timer)
+      pending.resolve(false)
+    }
+    this.pendingApprovals.clear()
   }
 
   async sendMessage(
@@ -485,6 +511,11 @@ export class AgentManager {
     // Merge MCP tools that the employee has enabled
     const allTools = this.mergeEmployeeMcpTools(employee, tools)
 
+    // Wrap tools that require approval (unless autoApproveAll is set)
+    if (!employee.permissions.autoApproveAll && this.onApprovalRequest) {
+      this.wrapToolsWithApproval(allTools, employee, conversationId)
+    }
+
     try {
       let responseText: string
 
@@ -495,7 +526,8 @@ export class AgentManager {
           systemPrompt,
           messages,
           onStream,
-          toolCallCb ? (data) => toolCallCb(data) : undefined
+          toolCallCb ? (data) => toolCallCb(data) : undefined,
+          conversationId ? (data) => this.onFileWritten?.({ conversationId, ...data }) : undefined
         )
       } else {
         responseText = await this.runAgent(
@@ -569,7 +601,8 @@ export class AgentManager {
     systemPrompt: string,
     messages: { role: 'user' | 'assistant' | 'system'; content: string }[],
     onStream: (chunk: string) => void,
-    onToolCall?: (data: { tool: string; summary: string }) => void
+    onToolCall?: (data: { tool: string; summary: string; detail?: string }) => void,
+    onFileWritten?: (data: { path: string; content: string }) => void
   ): Promise<string> {
     // Get enabled builtin tool IDs
     const enabledToolIds = employee.tools
@@ -602,7 +635,8 @@ export class AgentManager {
       mcpServers,
       conversationHistory: history.length > 0 ? history : undefined,
       onStream,
-      onToolCall
+      onToolCall,
+      onFileWritten
     })
 
     return promise
@@ -1113,6 +1147,68 @@ export class AgentManager {
     prompt += '\n- Don\'t produce a half-finished deliverable. Ask first, deliver second.'
 
     return prompt
+  }
+
+  /**
+   * Wrap tools that require approval with a blocking Promise.
+   * The agent's tool execution pauses until the user approves or denies.
+   */
+  private wrapToolsWithApproval(
+    allTools: Record<string, ReturnType<typeof createTool>>,
+    employee: Employee,
+    conversationId: string
+  ) {
+    for (const [toolKey, tool] of Object.entries(allTools)) {
+      // Match tool key to employee's ToolAssignment
+      const assignment = this.findToolAssignment(employee, toolKey)
+      if (!assignment?.requiresApproval) continue
+
+      const originalExecute = (tool as Record<string, unknown>).execute as (input: Record<string, unknown>) => Promise<Record<string, unknown>>
+      ;(tool as Record<string, unknown>).execute = async (input: Record<string, unknown>) => {
+        const approvalId = `approval-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+
+        // Build a readable summary of the tool call
+        const firstVal = input ? Object.values(input)[0] : null
+        const summary = typeof firstVal === 'string' && firstVal.length < 80
+          ? `${assignment.name}: ${firstVal}`
+          : assignment.name
+
+        // Emit approval request to frontend
+        this.onApprovalRequest?.({ conversationId, approvalId, tool: assignment.name, args: input || {}, summary })
+
+        // Block until user responds or timeout
+        const approved = await new Promise<boolean>((resolve) => {
+          const timer = setTimeout(() => {
+            this.pendingApprovals.delete(approvalId)
+            resolve(false)
+          }, 5 * 60 * 1000)
+          this.pendingApprovals.set(approvalId, { resolve, timer })
+        })
+
+        if (!approved) {
+          return { result: 'Tool call was denied by the user.' }
+        }
+
+        return originalExecute(input)
+      }
+    }
+  }
+
+  /**
+   * Match a tool key (e.g. 'web_search', 'mcp_server_tool') to the employee's ToolAssignment.
+   * Handles the hyphen/underscore mismatch between assignment IDs and tool keys.
+   */
+  private findToolAssignment(employee: Employee, toolKey: string): { name: string; requiresApproval: boolean } | undefined {
+    // Direct match
+    let assignment = employee.tools.find(t => t.id === toolKey && t.enabled)
+    if (assignment) return assignment
+
+    // Builtin tools: assignment uses hyphens (web-search), tool key uses underscores (web_search)
+    const hyphenated = toolKey.replace(/_/g, '-')
+    assignment = employee.tools.find(t => t.id === hyphenated && t.enabled)
+    if (assignment) return assignment
+
+    return undefined
   }
 
   /**

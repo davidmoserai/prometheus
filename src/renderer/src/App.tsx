@@ -67,6 +67,27 @@ export default function App() {
     return unsub
   }, [])
 
+  // Set up tool approval request listener
+  useEffect(() => {
+    if (!window.api?.chat?.onApprovalRequest) return
+    const unsub = window.api.chat.onApprovalRequest((data) => {
+      useAppStore.getState().appendStreamPart(data.conversationId, {
+        type: 'tool_approval',
+        approvalId: data.approvalId,
+        tool: data.tool,
+        args: data.args,
+        summary: data.summary,
+        status: 'pending'
+      })
+      useAppStore.getState().addNotification({
+        type: 'tool_approval',
+        title: 'Tool Approval Needed',
+        body: `${data.tool} requires your approval`
+      })
+    })
+    return unsub
+  }, [])
+
   // Set up message stored listener (backend confirms user/assistant messages)
   useEffect(() => {
     if (!window.api?.chat?.onMessageStored) return

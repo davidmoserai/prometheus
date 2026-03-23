@@ -5,6 +5,7 @@ export type StreamPart =
   | { type: 'text'; content: string }
   | { type: 'tool_call'; id: string; tool: string; summary: string; detail?: string; status: 'running' | 'done' }
   | { type: 'file_written'; path: string; content: string }
+  | { type: 'tool_approval'; approvalId: string; tool: string; args: Record<string, unknown>; summary: string; status: 'pending' | 'approved' | 'rejected' }
 
 interface Company {
   id: string
@@ -224,6 +225,7 @@ interface AppState {
   appendStreamText: (convId: string, delta: string) => void
   appendStreamPart: (convId: string, part: StreamPart) => void
   clearStreamingParts: (convId: string) => void
+  respondToApproval: (approvalId: string, approved: boolean) => void
 
   // Actions — Companies
   loadCompanies: () => Promise<void>
@@ -348,6 +350,20 @@ export const useAppStore = create<AppState>((set, get) => ({
       const { [convId]: _, ...rest } = state.streamingParts
       return { streamingParts: rest }
     }),
+  respondToApproval: (approvalId, approved) => {
+    window.api?.chat?.respondApproval(approvalId, approved)
+    set((state) => {
+      const newParts = { ...state.streamingParts }
+      for (const [convId, parts] of Object.entries(newParts)) {
+        newParts[convId] = parts.map(p =>
+          p.type === 'tool_approval' && p.approvalId === approvalId
+            ? { ...p, status: approved ? 'approved' as const : 'rejected' as const }
+            : p
+        )
+      }
+      return { streamingParts: newParts }
+    })
+  },
 
   // Companies
   loadCompanies: async () => {
