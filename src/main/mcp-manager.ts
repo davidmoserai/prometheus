@@ -2,6 +2,25 @@ import { MCPClient } from '@mastra/mcp'
 import type { Tool } from '@mastra/core/tools'
 import type { MCPServerConfig } from './types'
 
+// Build env with proper PATH for MCP subprocesses (Electron strips user paths)
+function mcpEnv(extra?: Record<string, string>): Record<string, string> {
+  const env: Record<string, string> = {}
+  for (const [k, v] of Object.entries(process.env)) {
+    if (v !== undefined) env[k] = v
+  }
+  delete env.ELECTRON_RUN_AS_NODE
+  const home = env.HOME || ''
+  const extraPaths = [
+    `${home}/.local/bin`,
+    `${home}/.nvm/current/bin`,
+    '/usr/local/bin',
+    '/opt/homebrew/bin'
+  ]
+  env.PATH = [...extraPaths, env.PATH || ''].join(':')
+  if (extra) Object.assign(env, extra)
+  return env
+}
+
 // ============================================================
 // MCPManager — manages MCP server connections and tool discovery
 // ============================================================
@@ -24,7 +43,7 @@ export class MCPManager {
         [config.id]: {
           command: config.command,
           args: config.args,
-          env: config.env
+          env: mcpEnv(config.env)
         }
       }
     })
