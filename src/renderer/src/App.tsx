@@ -9,7 +9,7 @@ import { SettingsPage } from '@/components/settings/settings-page'
 import { useAppStore, type ChatMessage } from '@/stores/app-store'
 
 export default function App() {
-  const { activeView, loadCompanies, loadEmployees, loadTerminatedEmployees, loadDepartments, loadKnowledge, loadTasks, loadRecurringTasks, loadSettings } = useAppStore()
+  const { activeView, loadCompanies, loadEmployees, loadTerminatedEmployees, loadDepartments, loadKnowledge, loadTasks, loadRecurringTasks, loadSettings, loadMcpServers, loadComposioStatus } = useAppStore()
   const [updateReady, setUpdateReady] = useState(false)
 
   // Load companies first, then scoped data
@@ -23,11 +23,13 @@ export default function App() {
         loadKnowledge(),
         loadTasks(),
         loadRecurringTasks(),
-        loadSettings()
+        loadSettings(),
+        loadMcpServers(),
+        loadComposioStatus()
       ])
     }
     init()
-  }, [loadCompanies, loadEmployees, loadTerminatedEmployees, loadDepartments, loadKnowledge, loadTasks, loadRecurringTasks, loadSettings])
+  }, [loadCompanies, loadEmployees, loadTerminatedEmployees, loadDepartments, loadKnowledge, loadTasks, loadRecurringTasks, loadSettings, loadMcpServers, loadComposioStatus])
 
   // Set up streaming listener (receives text deltas)
   useEffect(() => {
