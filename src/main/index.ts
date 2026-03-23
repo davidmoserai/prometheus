@@ -136,6 +136,11 @@ function registerIpcHandlers(): void {
     )
   })
 
+  // Chat: abort active stream
+  ipcMain.handle('chat:stop', (_event, conversationId: string) => {
+    agentManager.abortStream(conversationId)
+  })
+
   // Chat: tool approval response
   ipcMain.handle('chat:respondApproval', (_event, approvalId: string, approved: boolean) => {
     agentManager.respondToApproval(approvalId, approved)
@@ -418,6 +423,9 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', async () => {
+  // Abort any active agent streams
+  agentManager?.abortAllStreams()
+
   // Cancel any pending tool approvals
   agentManager?.cancelAllPendingApprovals()
 
