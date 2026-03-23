@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { CheckCircle, ExternalLink, Key, Loader2, Trash2 } from 'lucide-react'
+import { CheckCircle, ExternalLink, Key, Loader2, RefreshCw } from 'lucide-react'
 import { useAppStore } from '../../stores/app-store'
 import type { IntegrationDefinition } from '../../../../main/integration-catalog'
 
@@ -7,8 +7,7 @@ export function IntegrationsSection(): React.JSX.Element {
   const {
     composioApiKeySet,
     loadComposioStatus,
-    setComposioApiKey,
-    disconnectIntegration
+    setComposioApiKey
   } = useAppStore()
 
   const [activeIntegrations, setActiveIntegrations] = useState<IntegrationDefinition[]>([])
@@ -16,7 +15,7 @@ export function IntegrationsSection(): React.JSX.Element {
   const [apiKeyInput, setApiKeyInput] = useState('')
   const [savingKey, setSavingKey] = useState(false)
   const [keyError, setKeyError] = useState('')
-  const [disconnecting, setDisconnecting] = useState<string | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
 
   const loadActive = useCallback(async (): Promise<void> => {
     if (!window.api?.composio) return
@@ -49,15 +48,14 @@ export function IntegrationsSection(): React.JSX.Element {
     }
   }, [apiKeyInput, setComposioApiKey, loadActive])
 
-  const handleDisconnect = useCallback(async (appId: string): Promise<void> => {
-    setDisconnecting(appId)
+  const handleRefresh = useCallback(async (): Promise<void> => {
+    setRefreshing(true)
     try {
-      await disconnectIntegration(appId)
-      setActiveIntegrations(prev => prev.filter(a => a.id !== appId))
+      await loadActive()
     } finally {
-      setDisconnecting(null)
+      setRefreshing(false)
     }
-  }, [disconnectIntegration])
+  }, [loadActive])
 
   return (
     <div>
@@ -128,34 +126,56 @@ export function IntegrationsSection(): React.JSX.Element {
               <span className="text-sm text-text-tertiary">Loading your integrations...</span>
             </div>
           ) : activeIntegrations.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-border-default text-center" style={{ padding: '48px 24px' }}>
-              <p className="text-text-secondary text-sm font-medium" style={{ marginBottom: '8px' }}>No integrations connected yet</p>
-              <p className="text-text-tertiary text-sm" style={{ marginBottom: '20px' }}>
-                Connect your apps on Composio, then come back here — they'll appear automatically.
-              </p>
+            <div className="rounded-2xl border border-dashed border-border-default" style={{ padding: '36px 32px' }}>
+              <p className="text-text-secondary text-sm font-medium" style={{ marginBottom: '16px' }}>No integrations connected yet</p>
+              <div className="text-sm text-text-tertiary" style={{ marginBottom: '20px', lineHeight: '1.7' }}>
+                <p style={{ marginBottom: '12px' }}>To connect an app (e.g. Gmail, Slack, Instagram):</p>
+                <ol style={{ paddingLeft: '20px', listStyleType: 'decimal' }}>
+                  <li style={{ marginBottom: '6px' }}>
+                    Open your{' '}
+                    <a href="https://app.composio.dev" target="_blank" rel="noreferrer" className="text-flame-400 hover:text-flame-300 transition-colors">
+                      Composio dashboard
+                    </a>
+                  </li>
+                  <li style={{ marginBottom: '6px' }}>Go to <span className="text-text-secondary font-medium">Auth Configs</span> → <span className="text-text-secondary font-medium">Create Auth Config</span></li>
+                  <li style={{ marginBottom: '6px' }}>Choose the app you want and follow the steps to connect your account</li>
+                  <li>Come back here — your connected apps will appear automatically</li>
+                </ol>
+              </div>
               <a
                 href="https://app.composio.dev"
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center rounded-xl bg-flame-500 text-white text-sm font-medium hover:bg-flame-400 transition-colors"
+                className="inline-flex items-center rounded-xl bg-flame-500 text-white text-sm font-medium hover:bg-flame-400 transition-colors cursor-pointer"
                 style={{ padding: '0 16px', height: '36px', gap: '6px', borderRadius: '10px' }}
               >
-                Connect apps on Composio <ExternalLink size={12} />
+                Open Composio Dashboard <ExternalLink size={12} />
               </a>
             </div>
           ) : (
             <div>
               <div className="flex items-center justify-between" style={{ marginBottom: '14px' }}>
                 <h3 className="text-xs font-semibold text-text-tertiary uppercase tracking-wider">Connected apps</h3>
-                <a
-                  href="https://app.composio.dev"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center text-xs text-flame-400 hover:text-flame-300 transition-colors"
-                  style={{ gap: '4px' }}
-                >
-                  Add more apps <ExternalLink size={11} />
-                </a>
+                <div className="flex items-center" style={{ gap: '12px' }}>
+                  <button
+                    onClick={handleRefresh}
+                    disabled={refreshing}
+                    className="inline-flex items-center text-xs text-text-tertiary hover:text-text-secondary transition-colors cursor-pointer disabled:opacity-50"
+                    style={{ gap: '4px' }}
+                  >
+                    <RefreshCw size={11} className={refreshing ? 'animate-spin' : ''} />
+                    Refresh
+                  </button>
+                  <a
+                    href="https://app.composio.dev"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center text-xs text-flame-400 hover:text-flame-300 transition-colors"
+                    style={{ gap: '4px' }}
+                  >
+                    Manage on Composio <ExternalLink size={11} />
+                  </a>
+                </div>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 {activeIntegrations.map(app => (
@@ -174,16 +194,6 @@ export function IntegrationsSection(): React.JSX.Element {
                         <CheckCircle size={12} className="text-emerald-400" />
                       </div>
                     </div>
-                    <button
-                      onClick={() => handleDisconnect(app.id)}
-                      disabled={disconnecting === app.id}
-                      className="text-text-quaternary hover:text-red-400 transition-colors disabled:opacity-50"
-                    >
-                      {disconnecting === app.id
-                        ? <Loader2 size={14} className="animate-spin" />
-                        : <Trash2 size={14} />
-                      }
-                    </button>
                   </div>
                 ))}
               </div>
