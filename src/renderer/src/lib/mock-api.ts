@@ -256,7 +256,7 @@ const defaultProviders = [
   { id: 'ollama', name: 'Ollama (Local)', apiKey: '', baseUrl: 'http://localhost:11434', models: ['llama3', 'mistral', 'codellama'], enabled: false }
 ]
 
-let settings = { providers: defaultProviders, defaultProvider: 'openai', defaultModel: 'gpt-4o', theme: 'dark' as const }
+let settings = { providers: defaultProviders, defaultProvider: 'openai', defaultModel: 'gpt-4o', theme: 'dark' as const, mcpServers: [] as { id: string; name: string; command: string; args: string[]; env?: Record<string, string>; enabled: boolean }[] }
 
 // Install mock API on window if not in Electron
 export function installMockApi() {
@@ -471,6 +471,14 @@ export function installMockApi() {
     },
     notifications: {
       onNotification: () => () => {}
+    },
+    mcp: {
+      list: async () => (settings as Record<string, unknown>).mcpServers || [],
+      add: async (_config: unknown) => ({ success: true, tools: ['mock_tool_1', 'mock_tool_2'] }),
+      update: async (_id: string, _updates: unknown) => ({ success: true, tools: [] }),
+      remove: async (_id: string) => ({ success: true }),
+      getTools: async (_serverId: string) => ['mock_tool_1', 'mock_tool_2'],
+      testConnection: async (_config: unknown) => ({ success: true, tools: ['mock_tool_1', 'mock_tool_2'] })
     },
     settings: {
       get: async () => settings,

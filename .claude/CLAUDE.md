@@ -46,11 +46,25 @@ Tailwind spacing utilities (`p-7`, `mb-5`, `gap-6`, etc.) do NOT render at corre
 - Tools built dynamically per request in `buildMastraTools()` using Mastra `createTool` + Zod schemas
 - **Memory tools** (always available): `save_memory`, `create_knowledge_doc`, `update_knowledge_doc`
 - **Builtin tools** (per employee config): `web_search`, `web_browse`, `read_file`, `write_file`, `execute_code`
+- **MCP tools**: External tools from connected MCP servers via `@mastra/mcp` package
 - **Delegation**: `delegate_task`, `message_employee` (when employee has contactable employees)
 - **Scheduling**: `create_scheduled_task` (always available)
 - **Tool call visibility**: `onToolCall` callback emits `chat:toolCall` IPC events for save_memory, knowledge docs, delegate/message tools
 - Tool call notices displayed inline in chat as subtle cards with icons (Brain, FileText, Users)
 - `write_file` emits `chat:fileWritten` event to show download cards in chat UI
+
+## MCP Server Integration
+- **Package**: `@mastra/mcp` — MCPClient connects to stdio-based MCP servers
+- **Manager**: `src/main/mcp-manager.ts` — MCPManager class manages multiple MCP server connections and tool discovery
+- **Config**: `MCPServerConfig` type in `types.ts` — `{ id, name, command, args, env, enabled }`
+- **Storage**: `AppSettings.mcpServers: MCPServerConfig[]` — persisted in JSON store
+- **IPC channels**: `mcp:list`, `mcp:add`, `mcp:update`, `mcp:remove`, `mcp:getTools`, `mcp:testConnection`
+- **Tool namespacing**: MCP tools prefixed with `mcp_{serverId}_{toolName}` to avoid collisions with builtin tools
+- **Employee integration**: `ToolAssignment.mcpServerId` links MCP tools to their server; `mergeEmployeeMcpTools()` in agent-manager merges enabled MCP tools per employee
+- **Settings UI**: MCP Servers section in settings page — add/remove servers, view discovered tools, toggle enable/disable
+- **Employee editor**: Tools tab has expandable sections — "Built-in" section + one "MCP: {name}" section per connected server
+- **Lifecycle**: MCPManager connects to all enabled servers on app start, disconnects on app quit
+- **Mock API**: `mcp` namespace with stubs for web preview mode
 
 ## Agent Memory System
 - `Employee.memory: string` — persistent memory field, survives across conversations
@@ -96,7 +110,8 @@ Tailwind spacing utilities (`p-7`, `mb-5`, `gap-6`, etc.) do NOT render at corre
 - `src/main/index.ts` — Electron entry, IPC handlers (store/agentManager init in `app.whenReady()`)
 - `src/main/store.ts` — EmployeeStore class, JSON persistence, company-scoped data
 - `src/main/types.ts` — All type definitions (Company, Employee, Task, etc.) + DEFAULT_PROVIDERS
-- `src/main/agent-manager.ts` — LLM agent manager (unified Zod tool defs; memory/knowledge tools; OpenAI-compatible, Anthropic, Ollama routing; streaming; prompt caching; token counting; compression)
+- `src/main/agent-manager.ts` — LLM agent manager (unified Zod tool defs; memory/knowledge tools; MCP tool merging; OpenAI-compatible, Anthropic, Ollama routing; streaming; prompt caching; token counting; compression)
+- `src/main/mcp-manager.ts` — MCP server connection manager (connect, disconnect, tool discovery)
 - `src/main/scheduler.ts` — Recurring task scheduler (60s interval check)
 - `src/preload/index.ts` — Secure IPC bridge
 - `src/renderer/src/lib/mock-api.ts` — Mock API for web preview mode

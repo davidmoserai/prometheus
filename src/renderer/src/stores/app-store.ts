@@ -45,8 +45,18 @@ interface ToolAssignment {
   id: string
   name: string
   source: 'builtin' | 'mcp'
+  mcpServerId?: string
   enabled: boolean
   requiresApproval: boolean
+}
+
+interface MCPServerConfig {
+  id: string
+  name: string
+  command: string
+  args: string[]
+  env?: Record<string, string>
+  enabled: boolean
 }
 
 interface PermissionSet {
@@ -158,6 +168,7 @@ interface AppSettings {
   defaultProvider: string
   defaultModel: string
   theme: 'dark' | 'light'
+  mcpServers: MCPServerConfig[]
 }
 
 interface AppState {
@@ -179,6 +190,10 @@ interface AppState {
 
   // Notifications
   notifications: AppNotification[]
+
+  // MCP
+  mcpServers: MCPServerConfig[]
+  mcpToolNames: Record<string, string[]> // serverId -> tool names
 
   // UI State
   activeView: 'dashboard' | 'employees' | 'chat' | 'knowledge' | 'tasks' | 'settings'
@@ -262,6 +277,14 @@ interface AppState {
   // Actions — Settings
   loadSettings: () => Promise<void>
   updateSettings: (settings: Partial<AppSettings>) => Promise<void>
+
+  // Actions — MCP
+  loadMcpServers: () => Promise<void>
+  addMcpServer: (config: MCPServerConfig) => Promise<{ success: boolean; tools?: string[]; error?: string }>
+  updateMcpServer: (id: string, updates: Partial<MCPServerConfig>) => Promise<{ success: boolean; tools?: string[]; error?: string }>
+  removeMcpServer: (id: string) => Promise<void>
+  getMcpTools: (serverId: string) => Promise<string[]>
+  testMcpConnection: (config: MCPServerConfig) => Promise<{ success: boolean; tools?: string[]; error?: string }>
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -275,6 +298,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   tasks: [],
   recurringTasks: [],
   notifications: [],
+  mcpServers: [],
+  mcpToolNames: {},
   settings: null,
   activeView: 'dashboard',
   selectedEmployeeId: null,
@@ -589,7 +614,58 @@ export const useAppStore = create<AppState>((set, get) => ({
   updateSettings: async (settings) => {
     await window.api.settings.update(settings)
     await get().loadSettings()
+  },
+
+  // MCP
+  loadMcpServers: async () => {
+    if (!window.api?.mcp) return
+    const servers = await window.api.mcp.list()
+    set({ mcpServers: servers || [] })
+
+    // Load tool names for each connected server
+    const toolNames: Record<string, string[]> = {}
+    for (const server of (servers || [])) {
+      if (server.enabled) {
+        try {
+          const tools = await window.api.mcp.getTools(server.id)
+          toolNames[server.id] = tools || []
+        } catch {
+          toolNames[server.id] = []
+        }
+      }
+    }
+    set({ mcpToolNames: toolNames })
+  },
+
+  addMcpServer: async (config) => {
+    if (!window.api?.mcp) return { success: false, error: 'MCP not available' }
+    const result = await window.api.mcp.add(config)
+    await get().loadMcpServers()
+    return result
+  },
+
+  updateMcpServer: async (id, updates) => {
+    if (!window.api?.mcp) return { success: false, error: 'MCP not available' }
+    const result = await window.api.mcp.update(id, updates)
+    await get().loadMcpServers()
+    return result
+  },
+
+  removeMcpServer: async (id) => {
+    if (!window.api?.mcp) return
+    await window.api.mcp.remove(id)
+    await get().loadMcpServers()
+  },
+
+  getMcpTools: async (serverId) => {
+    if (!window.api?.mcp) return []
+    return window.api.mcp.getTools(serverId)
+  },
+
+  testMcpConnection: async (config) => {
+    if (!window.api?.mcp) return { success: false, error: 'MCP not available' }
+    return window.api.mcp.testConnection(config)
   }
 }))
 
-export type { Company, Department, ContactAccess, Employee, KnowledgeDocument, Conversation, ChatMessage, ChatAttachment, Task, TaskMessage, RecurringTask, AppNotification, AppSettings, ProviderConfig, ToolAssignment, PermissionSet }
+export type { Company, Department, ContactAccess, Employee, KnowledgeDocument, Conversation, ChatMessage, ChatAttachment, Task, TaskMessage, RecurringTask, AppNotification, AppSettings, ProviderConfig, ToolAssignment, PermissionSet, MCPServerConfig }

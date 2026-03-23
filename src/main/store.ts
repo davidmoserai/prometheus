@@ -549,7 +549,9 @@ export class EmployeeStore {
           }
         }
         return defaultProv
-      })
+      }),
+      // Ensure mcpServers is always present (backward compatibility)
+      mcpServers: saved.mcpServers || []
     }
     return merged
   }

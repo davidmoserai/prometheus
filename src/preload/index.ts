@@ -105,6 +105,14 @@ const api = {
     get: () => ipcRenderer.invoke('settings:get'),
     update: (settings: unknown) => ipcRenderer.invoke('settings:update', settings)
   },
+  mcp: {
+    list: () => ipcRenderer.invoke('mcp:list'),
+    add: (config: unknown) => ipcRenderer.invoke('mcp:add', config),
+    update: (id: string, updates: unknown) => ipcRenderer.invoke('mcp:update', id, updates),
+    remove: (id: string) => ipcRenderer.invoke('mcp:remove', id),
+    getTools: (serverId: string) => ipcRenderer.invoke('mcp:getTools', serverId),
+    testConnection: (config: unknown) => ipcRenderer.invoke('mcp:testConnection', config)
+  },
   updates: {
     onAvailable: (callback: () => void) => {
       const handler = () => callback()

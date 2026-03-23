@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { ArrowLeft, Save, Sparkles, ArrowRight, Brain, Trash2, Plus } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { ArrowLeft, Save, Sparkles, ArrowRight, Brain, Trash2, Plus, ChevronDown, ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -16,12 +16,7 @@ const DEFAULT_TOOLS: ToolAssignment[] = [
   { id: 'web-browse', name: 'Web Browse', source: 'builtin', enabled: false, requiresApproval: false },
   { id: 'file-read', name: 'Read Files', source: 'builtin', enabled: false, requiresApproval: false },
   { id: 'file-write', name: 'Write Files', source: 'builtin', enabled: false, requiresApproval: true },
-  { id: 'code-execute', name: 'Execute Code', source: 'builtin', enabled: false, requiresApproval: true },
-  { id: 'email-send', name: 'Send Email', source: 'mcp', enabled: false, requiresApproval: true },
-  { id: 'calendar-manage', name: 'Calendar', source: 'mcp', enabled: false, requiresApproval: true },
-  { id: 'github', name: 'GitHub', source: 'mcp', enabled: false, requiresApproval: false },
-  { id: 'slack', name: 'Slack', source: 'mcp', enabled: false, requiresApproval: true },
-  { id: 'database', name: 'Database', source: 'mcp', enabled: false, requiresApproval: true }
+  { id: 'code-execute', name: 'Execute Code', source: 'builtin', enabled: false, requiresApproval: true }
 ]
 
 const DEFAULT_CONTACT_ACCESS: ContactAccess = {
@@ -100,7 +95,7 @@ interface EmployeeEditorProps {
 }
 
 export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
-  const { createEmployee, updateEmployee, knowledge, settings, departments, createDepartment } = useAppStore()
+  const { createEmployee, updateEmployee, knowledge, settings, departments, createDepartment, mcpServers, mcpToolNames, loadMcpServers } = useAppStore()
   const isEditing = !!employee
 
   // Template selection phase (only for new employees)
@@ -123,8 +118,14 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
   const [newDeptName, setNewDeptName] = useState('')
   const [memoryText, setMemoryText] = useState(employee?.memory || '')
   const [activeTab, setActiveTab] = useState<'basic' | 'tools' | 'knowledge' | 'permissions'>('basic')
+  const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({})
 
   const enabledProviders = settings?.providers.filter(p => p.enabled || p.id === 'ollama') || []
+
+  // Load MCP servers on mount
+  useEffect(() => {
+    loadMcpServers()
+  }, [])
 
   const handleCreateDept = async () => {
     if (!newDeptName.trim()) return
@@ -539,49 +540,192 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
           )}
 
           {activeTab === 'tools' && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Available Tools</CardTitle>
-                <CardDescription>
-                  Select which tools this employee can use. Toggle approval to require your confirmation before execution.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="flex flex-col" style={{ gap: '4px' }}>
-                  {tools.map((tool) => (
-                    <div
-                      key={tool.id}
-                      className={`flex items-center justify-between rounded-xl transition-all duration-300 ${
-                        tool.enabled
-                          ? 'bg-flame-500/[0.04] border border-flame-500/10 shadow-[0_0_16px_-6px_rgba(249,115,22,0.1)]'
-                          : 'hover:bg-white/[0.05] border border-transparent'
-                      }`}
-                      style={{ padding: '14px' }}
-                    >
-                      <div className="flex items-center" style={{ gap: '12px' }}>
-                        <Switch
-                          checked={tool.enabled}
-                          onCheckedChange={() => toggleTool(tool.id)}
-                        />
-                        <div>
-                          <p className="text-[13px] font-medium text-text-primary">{tool.name}</p>
-                          <Badge variant="secondary" className="mt-0.5">{tool.source}</Badge>
+            <div className="flex flex-col" style={{ gap: '16px' }}>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Available Tools</CardTitle>
+                  <CardDescription>
+                    Select which tools this employee can use. Toggle approval to require your confirmation before execution.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex flex-col" style={{ gap: '12px' }}>
+                    {/* Built-in Tools Section */}
+                    {(() => {
+                      const builtinTools = tools.filter(t => t.source === 'builtin')
+                      const enabledCount = builtinTools.filter(t => t.enabled).length
+                      const isCollapsed = collapsedSections['builtin'] ?? false
+
+                      return (
+                        <div className="rounded-xl border border-border-default overflow-hidden">
+                          {/* Section header */}
+                          <button
+                            onClick={() => setCollapsedSections(prev => ({ ...prev, builtin: !isCollapsed }))}
+                            className="flex items-center justify-between w-full text-left bg-bg-tertiary hover:bg-bg-surface transition-colors cursor-pointer"
+                            style={{ padding: '14px 16px' }}
+                          >
+                            <div className="flex items-center" style={{ gap: '10px' }}>
+                              {isCollapsed
+                                ? <ChevronRight className="w-4 h-4 text-text-tertiary" />
+                                : <ChevronDown className="w-4 h-4 text-text-tertiary" />
+                              }
+                              <span className="text-[13px] font-semibold text-text-primary">Built-in</span>
+                            </div>
+                            <Badge variant="secondary">{enabledCount}/{builtinTools.length} enabled</Badge>
+                          </button>
+
+                          {/* Tool list */}
+                          {!isCollapsed && (
+                            <div className="flex flex-col" style={{ gap: '2px', padding: '4px' }}>
+                              {builtinTools.map((tool) => (
+                                <div
+                                  key={tool.id}
+                                  className={`flex items-center justify-between rounded-lg transition-all duration-300 ${
+                                    tool.enabled
+                                      ? 'bg-flame-500/[0.04]'
+                                      : 'hover:bg-white/[0.03]'
+                                  }`}
+                                  style={{ padding: '10px 12px' }}
+                                >
+                                  <div className="flex items-center" style={{ gap: '10px' }}>
+                                    <Switch
+                                      checked={tool.enabled}
+                                      onCheckedChange={() => toggleTool(tool.id)}
+                                    />
+                                    <p className="text-[13px] font-medium text-text-primary">{tool.name}</p>
+                                  </div>
+                                  {tool.enabled && (
+                                    <div className="flex items-center" style={{ gap: '8px' }}>
+                                      <span className="text-[11px] text-text-tertiary">Approval</span>
+                                      <Switch
+                                        checked={tool.requiresApproval}
+                                        onCheckedChange={() => toggleToolApproval(tool.id)}
+                                      />
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
+                      )
+                    })()}
+
+                    {/* MCP Server Tool Sections */}
+                    {mcpServers.filter(s => s.enabled).map((server) => {
+                      const serverToolNames = mcpToolNames[server.id] || []
+                      if (serverToolNames.length === 0) return null
+
+                      const isCollapsed = collapsedSections[server.id] ?? true
+
+                      // Build tool assignments for this MCP server's tools
+                      const mcpToolAssignments = serverToolNames.map(toolName => {
+                        const assignmentId = `mcp_${server.id}_${toolName}`
+                        const existing = tools.find(t => t.id === assignmentId)
+                        return existing || {
+                          id: assignmentId,
+                          name: toolName,
+                          source: 'mcp' as const,
+                          mcpServerId: server.id,
+                          enabled: false,
+                          requiresApproval: false
+                        }
+                      })
+
+                      const enabledCount = mcpToolAssignments.filter(t => t.enabled).length
+
+                      const toggleMcpTool = (toolId: string) => {
+                        const existing = tools.find(t => t.id === toolId)
+                        if (existing) {
+                          setTools(tools.map(t => t.id === toolId ? { ...t, enabled: !t.enabled } : t))
+                        } else {
+                          // Add new MCP tool assignment
+                          const toolName = toolId.replace(`mcp_${server.id}_`, '')
+                          setTools([...tools, {
+                            id: toolId,
+                            name: toolName,
+                            source: 'mcp',
+                            mcpServerId: server.id,
+                            enabled: true,
+                            requiresApproval: false
+                          }])
+                        }
+                      }
+
+                      const toggleMcpToolApproval = (toolId: string) => {
+                        const existing = tools.find(t => t.id === toolId)
+                        if (existing) {
+                          setTools(tools.map(t => t.id === toolId ? { ...t, requiresApproval: !t.requiresApproval } : t))
+                        }
+                      }
+
+                      return (
+                        <div key={server.id} className="rounded-xl border border-border-default overflow-hidden">
+                          {/* Section header */}
+                          <button
+                            onClick={() => setCollapsedSections(prev => ({ ...prev, [server.id]: !isCollapsed }))}
+                            className="flex items-center justify-between w-full text-left bg-bg-tertiary hover:bg-bg-surface transition-colors cursor-pointer"
+                            style={{ padding: '14px 16px' }}
+                          >
+                            <div className="flex items-center" style={{ gap: '10px' }}>
+                              {isCollapsed
+                                ? <ChevronRight className="w-4 h-4 text-text-tertiary" />
+                                : <ChevronDown className="w-4 h-4 text-text-tertiary" />
+                              }
+                              <span className="text-[13px] font-semibold text-text-primary">MCP: {server.name}</span>
+                            </div>
+                            <Badge variant="secondary">{enabledCount}/{mcpToolAssignments.length} enabled</Badge>
+                          </button>
+
+                          {/* Tool list */}
+                          {!isCollapsed && (
+                            <div className="flex flex-col" style={{ gap: '2px', padding: '4px' }}>
+                              {mcpToolAssignments.map((tool) => (
+                                <div
+                                  key={tool.id}
+                                  className={`flex items-center justify-between rounded-lg transition-all duration-300 ${
+                                    tool.enabled
+                                      ? 'bg-flame-500/[0.04]'
+                                      : 'hover:bg-white/[0.03]'
+                                  }`}
+                                  style={{ padding: '10px 12px' }}
+                                >
+                                  <div className="flex items-center" style={{ gap: '10px' }}>
+                                    <Switch
+                                      checked={tool.enabled}
+                                      onCheckedChange={() => toggleMcpTool(tool.id)}
+                                    />
+                                    <p className="text-[13px] font-medium text-text-primary font-mono">{tool.name}</p>
+                                  </div>
+                                  {tool.enabled && (
+                                    <div className="flex items-center" style={{ gap: '8px' }}>
+                                      <span className="text-[11px] text-text-tertiary">Approval</span>
+                                      <Switch
+                                        checked={tool.requiresApproval}
+                                        onCheckedChange={() => toggleMcpToolApproval(tool.id)}
+                                      />
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+
+                    {/* No MCP servers message */}
+                    {mcpServers.filter(s => s.enabled).length === 0 && (
+                      <div className="rounded-xl border border-dashed border-border-default bg-bg-secondary text-center" style={{ padding: '24px' }}>
+                        <p className="text-[12px] text-text-tertiary">
+                          No MCP servers configured. Add servers in Settings to unlock external tools.
+                        </p>
                       </div>
-                      {tool.enabled && (
-                        <div className="flex items-center" style={{ gap: '10px' }}>
-                          <span className="text-[12px] text-text-tertiary">Needs approval</span>
-                          <Switch
-                            checked={tool.requiresApproval}
-                            onCheckedChange={() => toggleToolApproval(tool.id)}
-                          />
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
           )}
 
           {activeTab === 'knowledge' && (

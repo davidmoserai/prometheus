@@ -3,10 +3,13 @@ import { autoUpdater } from 'electron-updater'
 import { join } from 'path'
 import { EmployeeStore } from './store'
 import { AgentManager } from './agent-manager'
+import { MCPManager } from './mcp-manager'
 import { Scheduler } from './scheduler'
+import type { MCPServerConfig } from './types'
 
 let mainWindow: BrowserWindow | null = null
 let store: EmployeeStore
+let mcpManager: MCPManager
 let agentManager: AgentManager
 let scheduler: Scheduler
 
@@ -141,6 +144,75 @@ function registerIpcHandlers(): void {
   ipcMain.handle('settings:get', () => store.getSettings())
   ipcMain.handle('settings:update', (_event, settings) => store.updateSettings(settings))
 
+  // MCP Server IPC Handlers
+  ipcMain.handle('mcp:list', () => {
+    const s = store.getSettings()
+    return s.mcpServers || []
+  })
+
+  ipcMain.handle('mcp:add', async (_event, config: MCPServerConfig) => {
+    const s = store.getSettings()
+    const servers = [...(s.mcpServers || []), config]
+    store.updateSettings({ mcpServers: servers })
+
+    // Connect and discover tools
+    if (config.enabled) {
+      try {
+        const toolNames = await mcpManager.connect(config)
+        return { success: true, tools: toolNames }
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : 'Connection failed' }
+      }
+    }
+    return { success: true, tools: [] }
+  })
+
+  ipcMain.handle('mcp:update', async (_event, id: string, updates: Partial<MCPServerConfig>) => {
+    const s = store.getSettings()
+    const servers = (s.mcpServers || []).map(srv =>
+      srv.id === id ? { ...srv, ...updates } : srv
+    )
+    store.updateSettings({ mcpServers: servers })
+
+    // Reconnect if enabled, disconnect if disabled
+    const updated = servers.find(srv => srv.id === id)
+    if (updated) {
+      if (updated.enabled) {
+        try {
+          const toolNames = await mcpManager.connect(updated)
+          return { success: true, tools: toolNames }
+        } catch (err) {
+          return { success: false, error: err instanceof Error ? err.message : 'Connection failed' }
+        }
+      } else {
+        await mcpManager.disconnect(id)
+        return { success: true, tools: [] }
+      }
+    }
+    return { success: true, tools: [] }
+  })
+
+  ipcMain.handle('mcp:remove', async (_event, id: string) => {
+    await mcpManager.disconnect(id)
+    const s = store.getSettings()
+    const servers = (s.mcpServers || []).filter(srv => srv.id !== id)
+    store.updateSettings({ mcpServers: servers })
+    return { success: true }
+  })
+
+  ipcMain.handle('mcp:getTools', (_event, serverId: string) => {
+    return mcpManager.getToolNames(serverId)
+  })
+
+  ipcMain.handle('mcp:testConnection', async (_event, config: MCPServerConfig) => {
+    try {
+      const toolNames = await mcpManager.testConnection(config)
+      return { success: true, tools: toolNames }
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Connection failed' }
+    }
+  })
+
   // Auto-update IPC Handler
   ipcMain.handle('update:install', () => {
     autoUpdater.quitAndInstall()
@@ -150,7 +222,16 @@ function registerIpcHandlers(): void {
 app.whenReady().then(() => {
   // Initialize store after app is ready (needs app.getPath)
   store = new EmployeeStore()
-  agentManager = new AgentManager(store)
+  mcpManager = new MCPManager()
+  agentManager = new AgentManager(store, mcpManager)
+
+  // Connect to configured MCP servers on startup
+  const settings = store.getSettings()
+  if (settings.mcpServers?.length > 0) {
+    mcpManager.connectAll(settings.mcpServers).catch(err => {
+      console.error('Failed to connect MCP servers on startup:', err)
+    })
+  }
 
   // Push task updates to frontend in real-time
   agentManager.setTaskUpdateCallback((task) => {
@@ -235,4 +316,11 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
+})
+
+app.on('before-quit', async () => {
+  // Gracefully disconnect MCP servers on quit
+  if (mcpManager) {
+    await mcpManager.disconnectAll()
+  }
 })

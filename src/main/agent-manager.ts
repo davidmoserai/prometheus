@@ -7,6 +7,7 @@ import { createTool } from '@mastra/core/tools'
 import { z } from 'zod'
 import { EmployeeStore } from './store'
 import { ChatMessage, Employee, ProviderConfig, Task, TaskMessage } from './types'
+import type { MCPManager } from './mcp-manager'
 
 // ============================================================
 // Mastra model string/object builders
@@ -396,12 +397,14 @@ function buildMastraTools(
 
 export class AgentManager {
   private store: EmployeeStore
+  private mcpManager?: MCPManager
   private onTaskUpdate?: (task: Task) => void
   private onFileWritten?: (data: { conversationId: string; path: string; content: string }) => void
   private onToolCall?: (data: { conversationId: string; tool: string; summary: string; detail?: string }) => void
 
-  constructor(store: EmployeeStore) {
+  constructor(store: EmployeeStore, mcpManager?: MCPManager) {
     this.store = store
+    this.mcpManager = mcpManager
   }
 
   /** Set callback for notifying frontend when tasks are created/updated */
@@ -477,6 +480,9 @@ export class AgentManager {
       this.onFileWritten
     )
 
+    // Merge MCP tools that the employee has enabled
+    const allTools = this.mergeEmployeeMcpTools(employee, tools)
+
     try {
       const responseText = await this.runAgent(
         provider,
@@ -484,7 +490,7 @@ export class AgentManager {
         systemPrompt,
         messages,
         onStream,
-        Object.keys(tools).length > 0 ? tools : undefined
+        Object.keys(allTools).length > 0 ? allTools : undefined
       )
 
       const msg = this.store.addMessage(conversationId, { role: 'assistant', content: responseText })
@@ -1024,5 +1030,43 @@ export class AgentManager {
     prompt += '\n- Don\'t produce a half-finished deliverable. Ask first, deliver second.'
 
     return prompt
+  }
+
+  /**
+   * Merge MCP tools that the employee has enabled into the builtin tools record.
+   * Only includes MCP tools the employee explicitly has in their tools array with enabled=true.
+   */
+  private mergeEmployeeMcpTools(
+    employee: Employee,
+    builtinTools: Record<string, ReturnType<typeof createTool>>
+  ): Record<string, ReturnType<typeof createTool>> {
+    if (!this.mcpManager) return builtinTools
+
+    const allTools = { ...builtinTools }
+
+    // Get enabled MCP tool assignments for this employee
+    const mcpAssignments = employee.tools.filter(t => t.source === 'mcp' && t.enabled && t.mcpServerId)
+
+    // Group by server ID
+    const byServer = new Map<string, string[]>()
+    for (const assignment of mcpAssignments) {
+      const serverId = assignment.mcpServerId!
+      if (!byServer.has(serverId)) byServer.set(serverId, [])
+      byServer.get(serverId)!.push(assignment.id)
+    }
+
+    // Merge tools from each MCP server
+    for (const [serverId, enabledToolIds] of byServer) {
+      const serverTools = this.mcpManager.getTools(serverId)
+      for (const [toolName, tool] of Object.entries(serverTools)) {
+        // Tool ID in assignments is formatted as mcp_{serverId}_{toolName}
+        const assignmentId = `mcp_${serverId}_${toolName}`
+        if (enabledToolIds.includes(assignmentId)) {
+          allTools[`mcp_${serverId}_${toolName}`] = tool as ReturnType<typeof createTool>
+        }
+      }
+    }
+
+    return allTools
   }
 }

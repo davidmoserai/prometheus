@@ -43,8 +43,18 @@ export interface ToolAssignment {
   id: string
   name: string
   source: 'builtin' | 'mcp'
+  mcpServerId?: string
   enabled: boolean
   requiresApproval: boolean
+}
+
+export interface MCPServerConfig {
+  id: string
+  name: string
+  command: string
+  args: string[]
+  env?: Record<string, string>
+  enabled: boolean
 }
 
 export interface PermissionSet {
@@ -138,6 +148,7 @@ export interface AppSettings {
   defaultProvider: string
   defaultModel: string
   theme: 'dark' | 'light'
+  mcpServers: MCPServerConfig[]
 }
 
 export interface ProviderConfig {
@@ -280,7 +291,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   providers: DEFAULT_PROVIDERS,
   defaultProvider: 'openai',
   defaultModel: 'gpt-4o',
-  theme: 'dark'
+  theme: 'dark',
+  mcpServers: []
 }
 
 export const AVAILABLE_TOOLS: ToolAssignment[] = [
@@ -288,12 +300,7 @@ export const AVAILABLE_TOOLS: ToolAssignment[] = [
   { id: 'web-browse', name: 'Web Browse', source: 'builtin', enabled: false, requiresApproval: false },
   { id: 'file-read', name: 'Read Files', source: 'builtin', enabled: false, requiresApproval: false },
   { id: 'file-write', name: 'Write Files', source: 'builtin', enabled: false, requiresApproval: true },
-  { id: 'code-execute', name: 'Execute Code', source: 'builtin', enabled: false, requiresApproval: true },
-  { id: 'email-send', name: 'Send Email', source: 'mcp', enabled: false, requiresApproval: true },
-  { id: 'calendar-manage', name: 'Calendar', source: 'mcp', enabled: false, requiresApproval: true },
-  { id: 'github', name: 'GitHub', source: 'mcp', enabled: false, requiresApproval: false },
-  { id: 'slack', name: 'Slack', source: 'mcp', enabled: false, requiresApproval: true },
-  { id: 'database', name: 'Database', source: 'mcp', enabled: false, requiresApproval: true }
+  { id: 'code-execute', name: 'Execute Code', source: 'builtin', enabled: false, requiresApproval: true }
 ]
 
 export const EMPLOYEE_AVATARS = [
