@@ -17,6 +17,8 @@ function mcpEnv(extra?: Record<string, string>): Record<string, string> {
     '/opt/homebrew/bin'
   ]
   env.PATH = [...extraPaths, env.PATH || ''].join(':')
+  // Ensure MCP servers can open browsers for OAuth flows
+  if (!env.BROWSER) env.BROWSER = '/usr/bin/open'
   if (extra) Object.assign(env, extra)
   return env
 }
@@ -50,8 +52,14 @@ export class MCPManager {
 
     this.clients.set(config.id, client)
 
-    // Discover tools (listToolsets returns tools grouped by server, without namespace prefix)
-    const toolsets = await client.listToolsets()
+    // Discover tools with a timeout so the UI doesn't hang
+    const timeoutMs = 30000
+    const toolsetPromise = client.listToolsets()
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`Connection timed out after ${timeoutMs / 1000}s — the server may need browser auth. Try running it manually first: ${config.command} ${config.args.join(' ')}`)), timeoutMs)
+    )
+
+    const toolsets = await Promise.race([toolsetPromise, timeoutPromise])
     const serverTools = toolsets[config.id] || {}
     this.toolCache.set(config.id, serverTools)
 
