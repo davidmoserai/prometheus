@@ -454,7 +454,8 @@ export class AgentManager {
     conversationId: string,
     content: string,
     onStream: (chunk: string) => void,
-    onMessageStored?: (msg: ChatMessage) => void
+    onMessageStored?: (msg: ChatMessage) => void,
+    skipApproval = false
   ): Promise<ChatMessage> {
     // Store user message and notify frontend immediately
     const userMsg = this.store.addMessage(conversationId, { role: 'user', content })
@@ -512,8 +513,8 @@ export class AgentManager {
     // Merge MCP tools that the employee has enabled
     const allTools = this.mergeEmployeeMcpTools(employee, tools)
 
-    // Wrap tools that require approval (unless autoApproveAll is set)
-    if (!employee.permissions.autoApproveAll && this.onApprovalRequest) {
+    // Wrap tools that require approval (unless autoApproveAll is set or this is an automated call)
+    if (!skipApproval && !employee.permissions.autoApproveAll && this.onApprovalRequest) {
       this.wrapToolsWithApproval(allTools, employee, conversationId)
     }
 
@@ -529,7 +530,8 @@ export class AgentManager {
           onStream,
           conversationId,
           toolCallCb ? (data) => toolCallCb(data) : undefined,
-          conversationId ? (data) => this.onFileWritten?.({ conversationId, ...data }) : undefined
+          conversationId ? (data) => this.onFileWritten?.({ conversationId, ...data }) : undefined,
+          skipApproval
         )
       } else {
         responseText = await this.runAgent(
@@ -605,7 +607,8 @@ export class AgentManager {
     onStream: (chunk: string) => void,
     conversationId?: string,
     onToolCall?: (data: { tool: string; summary: string; detail?: string }) => void,
-    onFileWritten?: (data: { path: string; content: string }) => void
+    onFileWritten?: (data: { path: string; content: string }) => void,
+    skipApproval = false
   ): Promise<string> {
     // All enabled builtin tools are passed — approval is handled per-invocation via hooks
     const enabledToolIds = employee.tools
@@ -614,7 +617,7 @@ export class AgentManager {
 
     // Determine which Claude Code tool names require per-invocation approval via hooks
     const requiresApprovalClaudeNames = new Set<string>()
-    if (!employee.permissions.autoApproveAll && this.onApprovalRequest) {
+    if (!skipApproval && !employee.permissions.autoApproveAll && this.onApprovalRequest) {
       for (const tool of employee.tools.filter(t => t.enabled && t.requiresApproval)) {
         if (tool.source === 'builtin') {
           // Map builtin tool ID → Claude Code tool names (e.g. read_file → Read, Glob, Grep)
@@ -1222,7 +1225,6 @@ export class AgentManager {
       const assignment = this.findToolAssignment(employee, toolKey)
       if (!assignment?.requiresApproval) continue
 
-      console.log(`Wrapping tool "${toolKey}" with approval gate`)
       const originalExecute = (tool as Record<string, unknown>).execute as (input: Record<string, unknown>) => Promise<Record<string, unknown>>
       const wrappedExecute = async (input: Record<string, unknown>) => {
         const approvalId = `approval-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
