@@ -1297,6 +1297,20 @@ export class AgentManager {
     prompt += '\n\nYou can create new knowledge documents using create_knowledge_doc for important information that should persist.'
     prompt += '\nYou can use create_scheduled_task to set up recurring automated tasks.'
 
+    // Composio integration instructions — tell the agent what apps it can use
+    const composioTools = employee.tools.filter(t => t.source === 'mcp' && t.enabled && t.mcpServerId === 'composio-integrations')
+    if (composioTools.length > 0) {
+      const connectedApps = Object.entries(
+        this.store.getSettings()
+      ).length // just need to check if composio is active
+      prompt += '\n\n## Connected Integrations (via Composio)'
+      prompt += '\nYou have access to external app integrations. Use these Composio tools to interact with connected apps:'
+      prompt += '\n- COMPOSIO_SEARCH_TOOLS: Search for available actions in connected apps (e.g. search for "instagram" to find posting, analytics tools)'
+      prompt += '\n- COMPOSIO_MULTI_EXECUTE_TOOL: Execute actions in connected apps'
+      prompt += '\n- COMPOSIO_GET_TOOL_SCHEMAS: Get detailed schemas for specific tools before using them'
+      prompt += '\nWhen the user asks you to do something with a connected app, first use COMPOSIO_SEARCH_TOOLS to find the right action, then use COMPOSIO_MULTI_EXECUTE_TOOL to execute it.'
+    }
+
     // Task delegation instructions
     prompt += '\n\nWhen working on a delegated task:'
     prompt += '\n- If you need more information, use message_employee to ask the sender'
