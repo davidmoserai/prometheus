@@ -27,11 +27,12 @@ export function Switch({ checked, onCheckedChange, className, disabled }: Switch
     >
       <span
         className={cn(
-          'pointer-events-none block h-[18px] w-[18px] rounded-full shadow-sm transition-all duration-300 ease-out mt-[2px]',
+          'pointer-events-none block rounded-full shadow-sm transition-all duration-300 ease-out',
           checked
             ? 'translate-x-[20px] bg-white shadow-[0_0_8px_rgba(249,115,22,0.3)]'
             : 'translate-x-[2px] bg-white/80'
         )}
+        style={{ width: '18px', height: '18px', marginTop: '2px' }}
       />
     </button>
   )
