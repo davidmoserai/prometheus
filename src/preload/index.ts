@@ -105,6 +105,11 @@ const api = {
     get: () => ipcRenderer.invoke('settings:get'),
     update: (settings: unknown) => ipcRenderer.invoke('settings:update', settings)
   },
+  claudeCode: {
+    isInstalled: () => ipcRenderer.invoke('claude-code:isInstalled'),
+    authStatus: () => ipcRenderer.invoke('claude-code:authStatus'),
+    login: () => ipcRenderer.invoke('claude-code:login')
+  },
   mcp: {
     list: () => ipcRenderer.invoke('mcp:list'),
     add: (config: unknown) => ipcRenderer.invoke('mcp:add', config),

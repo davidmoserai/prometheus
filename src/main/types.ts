@@ -284,6 +284,13 @@ export const DEFAULT_PROVIDERS: ProviderConfig[] = [
     baseUrl: 'http://localhost:11434',
     models: ['llama3', 'mistral', 'codellama', 'phi3'],
     enabled: false
+  },
+  {
+    id: 'claude-code',
+    name: 'Claude Code (CLI)',
+    apiKey: '',
+    models: ['opus', 'sonnet', 'haiku'],
+    enabled: false
   }
 ]
 

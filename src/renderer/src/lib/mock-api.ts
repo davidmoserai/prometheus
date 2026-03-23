@@ -472,6 +472,11 @@ export function installMockApi() {
     notifications: {
       onNotification: () => () => {}
     },
+    claudeCode: {
+      isInstalled: async () => false,
+      authStatus: async () => ({ authenticated: false }),
+      login: async () => ({ authenticated: false, error: 'Not available in web preview' })
+    },
     mcp: {
       list: async () => (settings as Record<string, unknown>).mcpServers || [],
       add: async (_config: unknown) => ({ success: true, tools: ['mock_tool_1', 'mock_tool_2'] }),

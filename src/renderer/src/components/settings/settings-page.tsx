@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react'
-import { Key, Save, Eye, EyeOff, Check, AlertCircle, Plus, Trash2, Server, Loader2, Wrench } from 'lucide-react'
+import { useState, useEffect, useCallback } from 'react'
+import { Key, Save, Eye, EyeOff, Check, AlertCircle, Plus, Trash2, Server, Loader2, Wrench, Terminal, LogIn, CheckCircle2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -56,6 +56,13 @@ const PROVIDER_INFO: Record<string, { description: string; signupUrl: string; co
     color: 'text-sky-400',
     icon: 'L',
     glowColor: 'rgba(56, 189, 248, 0.15)'
+  },
+  'claude-code': {
+    description: 'Use your Claude Code subscription. No API key needed.',
+    signupUrl: 'https://claude.ai',
+    color: 'text-amber-400',
+    icon: '>_',
+    glowColor: 'rgba(251, 191, 36, 0.15)'
   }
 }
 
@@ -66,6 +73,39 @@ export function SettingsPage() {
   const [defaultModel, setDefaultModel] = useState(settings?.defaultModel || 'gpt-4o')
   const [showKeys, setShowKeys] = useState<Record<string, boolean>>({})
   const [saved, setSaved] = useState(false)
+
+  // Claude Code auth state
+  const [ccInstalled, setCcInstalled] = useState<boolean | null>(null)
+  const [ccAuth, setCcAuth] = useState<{ authenticated: boolean; loginMethod?: string; email?: string; error?: string } | null>(null)
+  const [ccLoggingIn, setCcLoggingIn] = useState(false)
+
+  const checkClaudeCode = useCallback(async () => {
+    try {
+      const installed = await window.api.claudeCode.isInstalled()
+      setCcInstalled(installed)
+      if (installed) {
+        const status = await window.api.claudeCode.authStatus()
+        setCcAuth(status)
+      }
+    } catch {
+      setCcInstalled(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    checkClaudeCode()
+  }, [checkClaudeCode])
+
+  const handleClaudeCodeLogin = async () => {
+    setCcLoggingIn(true)
+    try {
+      const status = await window.api.claudeCode.login()
+      setCcAuth(status)
+    } catch {
+      setCcAuth({ authenticated: false, error: 'Login failed' })
+    }
+    setCcLoggingIn(false)
+  }
 
   // MCP form state
   const [showMcpForm, setShowMcpForm] = useState(false)
@@ -151,6 +191,11 @@ export function SettingsPage() {
   }
 
   const getConnectionStatus = (provider: ProviderConfig): { label: string; variant: 'success' | 'warning' | 'secondary' } => {
+    if (provider.id === 'claude-code') {
+      if (ccAuth?.authenticated) return { label: 'Connected', variant: 'success' }
+      if (ccInstalled === false) return { label: 'CLI not found', variant: 'warning' }
+      return { label: 'Not logged in', variant: 'warning' }
+    }
     if (provider.apiKey) {
       return { label: 'API Key Set', variant: 'success' }
     }
@@ -243,6 +288,7 @@ export function SettingsPage() {
             const status = getConnectionStatus(provider)
             const isLocalOllama = provider.id === 'ollama'
             const isOllamaCloud = provider.id === 'ollama-cloud'
+            const isClaudeCode = provider.id === 'claude-code'
 
             return (
               <div
@@ -292,8 +338,55 @@ export function SettingsPage() {
                 {provider.enabled && (
                   <div className="relative flex flex-col border-t border-white/[0.08] animate-fade-in" style={{ gap: '16px', marginTop: '20px', paddingTop: '20px' }}>
 
+                    {/* Claude Code Auth Section */}
+                    {isClaudeCode && (
+                      <div className="rounded-xl bg-bg-tertiary border border-border-subtle" style={{ padding: '20px' }}>
+                        <div className="flex items-center" style={{ gap: '8px', marginBottom: '12px' }}>
+                          <Terminal className="w-4 h-4 text-amber-400 drop-shadow-[0_0_6px_rgba(251,191,36,0.4)]" />
+                          <span className="text-[13px] font-medium text-text-primary">Claude Code CLI</span>
+                        </div>
+
+                        {ccInstalled === false && (
+                          <div>
+                            <p className="text-[13px] text-red-300" style={{ marginBottom: '8px' }}>
+                              Claude Code CLI not found. Install it first:
+                            </p>
+                            <code className="block text-[12px] font-mono text-text-secondary bg-bg-primary rounded-lg" style={{ padding: '10px 14px' }}>
+                              npm install -g @anthropic-ai/claude-code
+                            </code>
+                          </div>
+                        )}
+
+                        {ccInstalled && !ccAuth?.authenticated && (
+                          <div>
+                            <p className="text-[13px] text-text-secondary" style={{ marginBottom: '12px' }}>
+                              Log in to your Claude account to use your subscription.
+                            </p>
+                            <Button size="sm" onClick={handleClaudeCodeLogin} disabled={ccLoggingIn}>
+                              {ccLoggingIn ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <LogIn className="w-3.5 h-3.5" />}
+                              {ccLoggingIn ? 'Opening browser...' : 'Connect Claude Account'}
+                            </Button>
+                          </div>
+                        )}
+
+                        {ccInstalled && ccAuth?.authenticated && (
+                          <div className="flex items-center" style={{ gap: '10px' }}>
+                            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                            <div>
+                              <p className="text-[13px] text-text-primary">{ccAuth.email}</p>
+                              <p className="text-[11px] text-text-tertiary">{ccAuth.loginMethod}</p>
+                            </div>
+                          </div>
+                        )}
+
+                        <p className="text-[11px] text-text-tertiary" style={{ marginTop: '12px' }}>
+                          Uses your existing Claude subscription — no API key or extra charges. Agents run as Claude Code subprocesses with full tool access.
+                        </p>
+                      </div>
+                    )}
+
                     {/* API Key Section */}
-                    {!isLocalOllama && (
+                    {!isLocalOllama && !isClaudeCode && (
                       <div className="rounded-xl bg-bg-tertiary border border-border-subtle" style={{ padding: '20px' }}>
                         <div className="flex items-center" style={{ gap: '8px', marginBottom: '12px' }}>
                           <Key className="w-4 h-4 text-flame-400 drop-shadow-[0_0_6px_rgba(249,115,22,0.4)]" />

@@ -6,6 +6,7 @@ import { AgentManager } from './agent-manager'
 import { MCPManager } from './mcp-manager'
 import { Scheduler } from './scheduler'
 import type { MCPServerConfig } from './types'
+import { isClaudeCodeInstalled, getAuthStatus, launchLogin } from './claude-code-runner'
 
 let mainWindow: BrowserWindow | null = null
 let store: EmployeeStore
@@ -211,6 +212,19 @@ function registerIpcHandlers(): void {
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Connection failed' }
     }
+  })
+
+  // Claude Code IPC Handlers
+  ipcMain.handle('claude-code:isInstalled', () => {
+    return isClaudeCodeInstalled()
+  })
+
+  ipcMain.handle('claude-code:authStatus', () => {
+    return getAuthStatus()
+  })
+
+  ipcMain.handle('claude-code:login', async () => {
+    return launchLogin()
   })
 
   // Auto-update IPC Handler

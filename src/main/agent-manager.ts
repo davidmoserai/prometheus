@@ -8,6 +8,7 @@ import { z } from 'zod'
 import { EmployeeStore } from './store'
 import { ChatMessage, Employee, ProviderConfig, Task, TaskMessage } from './types'
 import type { MCPManager } from './mcp-manager'
+import { runClaudeCode } from './claude-code-runner'
 
 // ============================================================
 // Mastra model string/object builders
@@ -441,15 +442,16 @@ export class AgentManager {
     const settings = this.store.getSettings()
     const provider = settings.providers.find(p => p.id === employee.provider)
 
-    if (!provider?.apiKey && provider?.id !== 'ollama') {
-      const errorMsg = `No API key configured for ${provider?.name || employee.provider}. Go to Settings to add your API key.`
+    if (!provider) {
+      const errorMsg = `Provider "${employee.provider}" not found. Check your settings.`
       const msg = this.store.addMessage(conversationId, { role: 'assistant', content: errorMsg })
       onStream(errorMsg)
       return msg
     }
 
-    if (!provider) {
-      const errorMsg = `Provider "${employee.provider}" not found. Check your settings.`
+    // Claude Code provider uses CLI auth, not API key
+    if (!provider.apiKey && provider.id !== 'ollama' && provider.id !== 'claude-code') {
+      const errorMsg = `No API key configured for ${provider.name}. Go to Settings to add your API key.`
       const msg = this.store.addMessage(conversationId, { role: 'assistant', content: errorMsg })
       onStream(errorMsg)
       return msg
@@ -484,14 +486,27 @@ export class AgentManager {
     const allTools = this.mergeEmployeeMcpTools(employee, tools)
 
     try {
-      const responseText = await this.runAgent(
-        provider,
-        employee,
-        systemPrompt,
-        messages,
-        onStream,
-        Object.keys(allTools).length > 0 ? allTools : undefined
-      )
+      let responseText: string
+
+      if (provider.id === 'claude-code') {
+        // Route to Claude Code CLI subprocess
+        responseText = await this.runClaudeCodeAgent(
+          employee,
+          systemPrompt,
+          messages,
+          onStream,
+          toolCallCb ? (data) => toolCallCb(data) : undefined
+        )
+      } else {
+        responseText = await this.runAgent(
+          provider,
+          employee,
+          systemPrompt,
+          messages,
+          onStream,
+          Object.keys(allTools).length > 0 ? allTools : undefined
+        )
+      }
 
       const msg = this.store.addMessage(conversationId, { role: 'assistant', content: responseText })
       return msg
@@ -543,6 +558,54 @@ export class AgentManager {
     }
 
     return accumulated
+  }
+
+  /**
+   * Run an employee via Claude Code CLI subprocess.
+   * Used when the employee's provider is 'claude-code'.
+   */
+  private async runClaudeCodeAgent(
+    employee: Employee,
+    systemPrompt: string,
+    messages: { role: 'user' | 'assistant' | 'system'; content: string }[],
+    onStream: (chunk: string) => void,
+    onToolCall?: (data: { tool: string; summary: string }) => void
+  ): Promise<string> {
+    // Get enabled builtin tool IDs
+    const enabledToolIds = employee.tools
+      .filter(t => t.enabled && t.source === 'builtin')
+      .map(t => t.id)
+
+    // Get enabled MCP servers for this employee
+    const mcpAssignments = employee.tools.filter(t => t.source === 'mcp' && t.enabled && t.mcpServerId)
+    const mcpServerIds = [...new Set(mcpAssignments.map(t => t.mcpServerId!))]
+    const settings = this.store.getSettings()
+    const mcpServers = mcpServerIds
+      .map(id => settings.mcpServers.find(s => s.id === id))
+      .filter(Boolean)
+      .map(s => ({ id: s!.id, command: s!.command, args: s!.args, env: s!.env }))
+
+    // Extract the latest user message as the prompt
+    const lastUserMsg = [...messages].reverse().find(m => m.role === 'user')
+    const prompt = lastUserMsg?.content || ''
+
+    // History is everything except the last user message
+    const history = lastUserMsg
+      ? messages.filter(m => m !== lastUserMsg)
+      : messages
+
+    const { promise } = runClaudeCode({
+      prompt,
+      systemPrompt,
+      model: employee.model,
+      enabledToolIds,
+      mcpServers,
+      conversationHistory: history.length > 0 ? history : undefined,
+      onStream,
+      onToolCall
+    })
+
+    return promise
   }
 
   /**
@@ -647,7 +710,7 @@ export class AgentManager {
     const settings = this.store.getSettings()
     const provider = settings.providers.find(p => p.id === toEmployee.provider)
     if (!provider) throw new Error(`Provider ${toEmployee.provider} not configured`)
-    if (!provider.apiKey && provider.id !== 'ollama') throw new Error(`No API key for ${provider.name}`)
+    if (!provider.apiKey && provider.id !== 'ollama' && provider.id !== 'claude-code') throw new Error(`No API key for ${provider.name}`)
 
     // Find or create the agent-to-agent conversation
     let conv = this.store.findAgentConversation(fromEmployee.id, toEmployeeId)
@@ -683,14 +746,12 @@ export class AgentManager {
     }))
 
     // Run target agent with no tools (simple response)
-    const responseText = await this.runAgent(
-      provider,
-      toEmployee,
-      systemPrompt,
-      messages,
-      () => {},
-      undefined
-    )
+    let responseText: string
+    if (provider.id === 'claude-code') {
+      responseText = await this.runClaudeCodeAgent(toEmployee, systemPrompt, messages, () => {})
+    } else {
+      responseText = await this.runAgent(provider, toEmployee, systemPrompt, messages, () => {}, undefined)
+    }
 
     // Store the response
     this.store.addMessage(conv.id, {
@@ -730,7 +791,7 @@ export class AgentManager {
 
     const settings = this.store.getSettings()
     const provider = settings.providers.find(p => p.id === employee.provider)
-    if (!provider?.apiKey && provider?.id !== 'ollama') return
+    if (!provider?.apiKey && provider?.id !== 'ollama' && provider?.id !== 'claude-code') return
     if (!provider) return
 
     // Split messages: older ones to summarize, keep last 4
@@ -739,19 +800,22 @@ export class AgentManager {
 
     // Build summary prompt
     const summaryContent = toSummarize.map(m => `${m.role}: ${m.content}`).join('\n\n')
-    const summaryMessages = [
+    const summaryMessages: { role: 'user' | 'assistant' | 'system'; content: string }[] = [
       { role: 'user', content: `Summarize this conversation concisely, preserving key facts, decisions, and context:\n\n${summaryContent}` }
     ]
 
-    // Use Mastra agent for the summary (no tools needed)
-    const summaryText = await this.runAgent(
-      provider,
-      employee,
-      'You are a helpful assistant that creates concise conversation summaries.',
-      summaryMessages,
-      () => {},
-      undefined
-    )
+    // Use agent for the summary (no tools needed)
+    let summaryText: string
+    if (provider.id === 'claude-code') {
+      summaryText = await this.runClaudeCodeAgent(
+        { ...employee, tools: [] },
+        'You are a helpful assistant that creates concise conversation summaries.',
+        summaryMessages,
+        () => {}
+      )
+    } else {
+      summaryText = await this.runAgent(provider, employee, 'You are a helpful assistant that creates concise conversation summaries.', summaryMessages, () => {}, undefined)
+    }
 
     // Replace old messages with summary + keep recent ones
     const summaryMsg: ChatMessage = {
@@ -777,7 +841,7 @@ export class AgentManager {
     const settings = this.store.getSettings()
     const provider = settings.providers.find(p => p.id === toEmployee.provider)
     if (!provider) throw new Error(`Provider ${toEmployee.provider} not configured`)
-    if (!provider.apiKey && provider.id !== 'ollama') throw new Error(`No API key for ${provider.name}`)
+    if (!provider.apiKey && provider.id !== 'ollama' && provider.id !== 'claude-code') throw new Error(`No API key for ${provider.name}`)
 
     // Update status to in_progress
     this.store.updateTask(task.id, { status: 'in_progress' })
@@ -809,7 +873,7 @@ export class AgentManager {
       this.onFileWritten
     )
 
-    const messages = [{ role: 'user', content: brief }]
+    const messages: { role: 'user' | 'assistant' | 'system'; content: string }[] = [{ role: 'user', content: brief }]
 
     // Track a live message ID for real-time streaming updates
     let liveMsg = this.store.addTaskMessage(task.id, { role: 'agent', employeeId: toEmployee.id, content: '...' })
@@ -817,25 +881,34 @@ export class AgentManager {
     if (currentTask) this.onTaskUpdate?.(currentTask)
 
     try {
-      const responseText = await this.runAgent(
-        provider,
-        toEmployee,
-        systemPrompt,
-        messages,
-        (accumulated) => {
-          // Update the live message with streaming text
-          const t = this.store.getTask(task.id)
-          if (t) {
-            const msgIdx = t.messages.findIndex(m => m.id === liveMsg.id)
-            if (msgIdx >= 0) {
-              t.messages[msgIdx].content = accumulated
-              this.store.updateTask(task.id, { messages: t.messages })
-              this.onTaskUpdate?.(t)
-            }
+      const taskStreamCb = (accumulated: string) => {
+        const t = this.store.getTask(task.id)
+        if (t) {
+          const msgIdx = t.messages.findIndex(m => m.id === liveMsg.id)
+          if (msgIdx >= 0) {
+            t.messages[msgIdx].content = accumulated
+            this.store.updateTask(task.id, { messages: t.messages })
+            this.onTaskUpdate?.(t)
           }
-        },
-        Object.keys(taskTools).length > 0 ? taskTools : undefined
-      )
+        }
+      }
+
+      let responseText: string
+      if (provider.id === 'claude-code') {
+        responseText = await this.runClaudeCodeAgent(
+          toEmployee, systemPrompt, messages, taskStreamCb,
+          (data) => {
+            this.store.addTaskMessage(task.id, { role: 'tool', content: `${data.tool}: ${data.summary}` })
+            const current = this.store.getTask(task.id)
+            if (current) this.onTaskUpdate?.(current)
+          }
+        )
+      } else {
+        responseText = await this.runAgent(
+          provider, toEmployee, systemPrompt, messages, taskStreamCb,
+          Object.keys(taskTools).length > 0 ? taskTools : undefined
+        )
+      }
 
       // Finalize the live message with complete text
       const finalTask = this.store.getTask(task.id)
@@ -901,7 +974,7 @@ export class AgentManager {
     const settings = this.store.getSettings()
     const provider = settings.providers.find(p => p.id === toEmployee.provider)
     if (!provider) throw new Error(`Provider "${toEmployee.provider}" not found in settings`)
-    if (!provider.apiKey && provider.id !== 'ollama') throw new Error(`No API key for ${provider.name}`)
+    if (!provider.apiKey && provider.id !== 'ollama' && provider.id !== 'claude-code') throw new Error(`No API key for ${provider.name}`)
 
     const systemPrompt = this.buildSystemPrompt(toEmployee)
 
@@ -929,24 +1002,34 @@ export class AgentManager {
     if (ct) this.onTaskUpdate?.(ct)
 
     try {
-      const responseText = await this.runAgent(
-        provider,
-        toEmployee,
-        systemPrompt,
-        messages,
-        (accumulated) => {
-          const t = this.store.getTask(taskId)
-          if (t) {
-            const msgIdx = t.messages.findIndex(m => m.id === continueMsg.id)
-            if (msgIdx >= 0) {
-              t.messages[msgIdx].content = accumulated
-              this.store.updateTask(taskId, { messages: t.messages })
-              this.onTaskUpdate?.(t)
-            }
+      const continueStreamCb = (accumulated: string) => {
+        const t = this.store.getTask(taskId)
+        if (t) {
+          const msgIdx = t.messages.findIndex(m => m.id === continueMsg.id)
+          if (msgIdx >= 0) {
+            t.messages[msgIdx].content = accumulated
+            this.store.updateTask(taskId, { messages: t.messages })
+            this.onTaskUpdate?.(t)
           }
-        },
-        Object.keys(taskTools).length > 0 ? taskTools : undefined
-      )
+        }
+      }
+
+      let responseText: string
+      if (provider.id === 'claude-code') {
+        responseText = await this.runClaudeCodeAgent(
+          toEmployee, systemPrompt, messages, continueStreamCb,
+          (data) => {
+            this.store.addTaskMessage(taskId, { role: 'tool', content: `${data.tool}: ${data.summary}` })
+            const current = this.store.getTask(taskId)
+            if (current) this.onTaskUpdate?.(current)
+          }
+        )
+      } else {
+        responseText = await this.runAgent(
+          provider, toEmployee, systemPrompt, messages, continueStreamCb,
+          Object.keys(taskTools).length > 0 ? taskTools : undefined
+        )
+      }
 
       // Finalize the live message
       const ft = this.store.getTask(taskId)
