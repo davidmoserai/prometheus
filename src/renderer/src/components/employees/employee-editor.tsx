@@ -850,9 +850,74 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
                       const serverToolNames = mcpToolNames[server.id] || []
                       if (serverToolNames.length === 0) return null
 
+                      // Composio uses meta tools — show a single toggle per connected app
+                      if (server.isComposio) {
+                        const connectedApps = Object.entries(useAppStore.getState().composioConnectedApps).filter(([, v]) => v).map(([k]) => k)
+                        if (connectedApps.length === 0) return null
+
+                        // All Composio meta tools are enabled/disabled as one unit
+                        const mcpToolAssignments = serverToolNames.map(toolName => {
+                          const assignmentId = `mcp_${server.id}_${toolName}`
+                          const existing = tools.find(t => t.id === assignmentId)
+                          return existing || {
+                            id: assignmentId,
+                            name: toolName,
+                            source: 'mcp' as const,
+                            mcpServerId: server.id,
+                            enabled: false,
+                            requiresApproval: false
+                          }
+                        })
+                        const isEnabled = mcpToolAssignments.some(t => t.enabled)
+                        const allRequireApproval = mcpToolAssignments.filter(t => t.enabled).every(t => t.requiresApproval)
+
+                        const toggleAll = (checked: boolean) => {
+                          const updatedTools = [...tools]
+                          for (const mTool of mcpToolAssignments) {
+                            const idx = updatedTools.findIndex(t => t.id === mTool.id)
+                            if (idx >= 0) {
+                              updatedTools[idx] = { ...updatedTools[idx], enabled: checked }
+                            } else if (checked) {
+                              updatedTools.push({ ...mTool, enabled: true })
+                            }
+                          }
+                          setTools(updatedTools)
+                        }
+
+                        const toggleApprovalAll = (checked: boolean) => {
+                          const updatedTools = tools.map(t =>
+                            t.mcpServerId === server.id ? { ...t, requiresApproval: checked } : t
+                          )
+                          setTools(updatedTools)
+                        }
+
+                        return (
+                          <div key={server.id} className="rounded-xl border border-border-default overflow-hidden">
+                            <div
+                              className="flex items-center justify-between bg-bg-tertiary"
+                              style={{ padding: '14px 16px' }}
+                            >
+                              <div className="flex items-center" style={{ gap: '10px' }}>
+                                <Switch checked={isEnabled} onCheckedChange={toggleAll} />
+                                <span className="text-[13px] font-semibold text-text-primary">🔗 Integrations</span>
+                                <span className="text-[11px] text-text-tertiary">
+                                  {connectedApps.map(a => a.charAt(0).toUpperCase() + a.slice(1)).join(', ')}
+                                </span>
+                              </div>
+                              {isEnabled && (
+                                <div className="flex items-center" style={{ gap: '8px' }}>
+                                  <span className="text-[11px] text-text-tertiary">Requires Approval</span>
+                                  <Switch checked={allRequireApproval} onCheckedChange={toggleApprovalAll} />
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )
+                      }
+
+                      // Regular MCP servers — show individual tools
                       const isCollapsed = collapsedSections[server.id] ?? true
 
-                      // Build tool assignments for this MCP server's tools
                       const mcpToolAssignments = serverToolNames.map(toolName => {
                         const assignmentId = `mcp_${server.id}_${toolName}`
                         const existing = tools.find(t => t.id === assignmentId)
@@ -875,7 +940,6 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
                         if (existing) {
                           setTools(tools.map(t => t.id === toolId ? { ...t, enabled: !t.enabled } : t))
                         } else {
-                          // Add new MCP tool assignment
                           const toolName = toolId.replace(`mcp_${server.id}_`, '')
                           setTools([...tools, {
                             id: toolId,
@@ -897,7 +961,6 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
 
                       return (
                         <div key={server.id} className="rounded-xl border border-border-default overflow-hidden">
-                          {/* Section header */}
                           <button
                             onClick={() => setCollapsedSections(prev => ({ ...prev, [server.id]: !isCollapsed }))}
                             className="flex items-center justify-between w-full text-left bg-bg-tertiary hover:bg-bg-surface transition-colors cursor-pointer"
@@ -908,17 +971,13 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
                                 ? <ChevronRight className="w-4 h-4 text-text-tertiary" />
                                 : <ChevronDown className="w-4 h-4 text-text-tertiary" />
                               }
-                              <span className="text-[13px] font-semibold text-text-primary">
-                                {server.isComposio ? '🔗 Integrations' : server.name}
-                              </span>
+                              <span className="text-[13px] font-semibold text-text-primary">{server.name}</span>
                             </div>
                             <Badge variant="secondary">{enabledCount}/{mcpToolAssignments.length} enabled</Badge>
                           </button>
 
-                          {/* Tool list */}
                           {!isCollapsed && (
                             <div className="flex flex-col" style={{ gap: '2px', padding: '4px' }}>
-                              {/* Column headers with bulk toggles */}
                               <div className="flex items-center justify-between" style={{ padding: '8px 12px 4px' }}>
                                 <div className="flex items-center" style={{ gap: '10px' }}>
                                   <Switch
@@ -961,26 +1020,18 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
                                 <div
                                   key={tool.id}
                                   className={`flex items-center justify-between rounded-lg transition-all duration-300 ${
-                                    tool.enabled
-                                      ? 'bg-flame-500/[0.04]'
-                                      : 'hover:bg-white/[0.03]'
+                                    tool.enabled ? 'bg-flame-500/[0.04]' : 'hover:bg-white/[0.03]'
                                   }`}
                                   style={{ padding: '10px 12px' }}
                                 >
                                   <div className="flex items-center" style={{ gap: '10px' }}>
-                                    <Switch
-                                      checked={tool.enabled}
-                                      onCheckedChange={() => toggleMcpTool(tool.id)}
-                                    />
+                                    <Switch checked={tool.enabled} onCheckedChange={() => toggleMcpTool(tool.id)} />
                                     <p className="text-[13px] font-medium text-text-primary font-mono">{tool.name}</p>
                                   </div>
                                   {tool.enabled && (
                                     <div className="flex items-center" style={{ gap: '8px' }}>
                                       <span className="text-[11px] text-text-tertiary">Requires Approval</span>
-                                      <Switch
-                                        checked={tool.requiresApproval}
-                                        onCheckedChange={() => toggleMcpToolApproval(tool.id)}
-                                      />
+                                      <Switch checked={tool.requiresApproval} onCheckedChange={() => toggleMcpToolApproval(tool.id)} />
                                     </div>
                                   )}
                                 </div>
