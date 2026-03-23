@@ -310,6 +310,11 @@ export const AVAILABLE_TOOLS: ToolAssignment[] = [
   { id: 'code-execute', name: 'Execute Code', source: 'builtin', enabled: false, requiresApproval: true }
 ]
 
+export type StreamPart =
+  | { type: 'text'; content: string }
+  | { type: 'tool_call'; id: string; tool: string; summary: string; detail?: string; status: 'running' | 'done' }
+  | { type: 'file_written'; path: string; content: string }
+
 export const EMPLOYEE_AVATARS = [
   '🔥', '⚡', '🧠', '🎯', '🚀', '💡', '🔮', '⭐',
   '🛡️', '🎨', '📊', '🔬', '📝', '🤖', '🦾', '🧬'

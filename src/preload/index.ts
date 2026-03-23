@@ -76,8 +76,8 @@ const api = {
       ipcRenderer.on('chat:fileWritten', handler)
       return () => ipcRenderer.removeListener('chat:fileWritten', handler)
     },
-    onToolCall: (callback: (data: { conversationId: string; tool: string; summary: string }) => void) => {
-      const handler = (_event: unknown, data: { conversationId: string; tool: string; summary: string }) => callback(data)
+    onToolCall: (callback: (data: { conversationId: string; id: string; tool: string; summary: string; detail?: string }) => void) => {
+      const handler = (_event: unknown, data: { conversationId: string; id: string; tool: string; summary: string; detail?: string }) => callback(data)
       ipcRenderer.on('chat:toolCall', handler)
       return () => ipcRenderer.removeListener('chat:toolCall', handler)
     }

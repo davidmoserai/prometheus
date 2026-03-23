@@ -279,9 +279,9 @@ app.whenReady().then(() => {
     mainWindow?.webContents.send('chat:fileWritten', data)
   })
 
-  // Push tool call events to frontend
+  // Push tool call events to frontend (with unique ID for chronological ordering)
   agentManager.setToolCallCallback((data) => {
-    mainWindow?.webContents.send('chat:toolCall', data)
+    mainWindow?.webContents.send('chat:toolCall', { ...data, id: `tc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` })
   })
 
   // Initialize and start the scheduler

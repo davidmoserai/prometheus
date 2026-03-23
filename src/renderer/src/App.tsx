@@ -29,11 +29,40 @@ export default function App() {
     init()
   }, [loadCompanies, loadEmployees, loadTerminatedEmployees, loadDepartments, loadKnowledge, loadTasks, loadRecurringTasks, loadSettings])
 
-  // Set up streaming listener
+  // Set up streaming listener (receives text deltas)
   useEffect(() => {
     if (!window.api?.chat?.onStream) return
     const unsub = window.api.chat.onStream((data) => {
-      useAppStore.getState().setStreamingContent(data.conversationId, data.chunk)
+      useAppStore.getState().appendStreamText(data.conversationId, data.chunk)
+    })
+    return unsub
+  }, [])
+
+  // Set up tool call listener (chronological inline rendering)
+  useEffect(() => {
+    if (!window.api?.chat?.onToolCall) return
+    const unsub = window.api.chat.onToolCall((data) => {
+      useAppStore.getState().appendStreamPart(data.conversationId, {
+        type: 'tool_call',
+        id: data.id,
+        tool: data.tool,
+        summary: data.summary,
+        detail: data.detail,
+        status: 'done'
+      })
+    })
+    return unsub
+  }, [])
+
+  // Set up file written listener (inline rendering with images)
+  useEffect(() => {
+    if (!window.api?.chat?.onFileWritten) return
+    const unsub = window.api.chat.onFileWritten((data) => {
+      useAppStore.getState().appendStreamPart(data.conversationId, {
+        type: 'file_written',
+        path: data.path,
+        content: data.content
+      })
     })
     return unsub
   }, [])

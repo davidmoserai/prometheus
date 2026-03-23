@@ -1,17 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Send, Plus, MessageSquare, ChevronLeft, ChevronDown, Users, ArrowRight, Trash2, Minimize2, FileText, Download, Paperclip, X, Brain } from 'lucide-react'
+import { Send, Plus, MessageSquare, ChevronLeft, ChevronDown, Users, ArrowRight, Trash2, Minimize2, FileText, Download, Paperclip, X, Brain, Terminal, Search, Globe, Edit3, Code } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { useAppStore, type Conversation, type ChatMessage, type ChatAttachment } from '@/stores/app-store'
-
-interface ToolCallNotice {
-  id: string
-  tool: string
-  summary: string
-  detail?: string
-  expanded?: boolean
-}
+import { useAppStore, type Conversation, type ChatMessage, type ChatAttachment, type StreamPart } from '@/stores/app-store'
 
 export function ChatPage() {
   const {
@@ -19,7 +11,7 @@ export function ChatPage() {
     conversations,
     selectedEmployeeId,
     selectedConversationId,
-    streamingContent,
+    streamingParts,
     setSelectedEmployee,
     setSelectedConversation,
     loadConversations,
@@ -39,16 +31,16 @@ export function ChatPage() {
   const [isCompressing, setIsCompressing] = useState(false)
   const [isUserScrolledUp, setIsUserScrolledUp] = useState(false)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
-  const [writtenFiles, setWrittenFiles] = useState<{ path: string; content: string }[]>([])
   const [stagedAttachments, setStagedAttachments] = useState<ChatAttachment[]>([])
-  const [toolCallNotices, setToolCallNotices] = useState<ToolCallNotice[]>([])
+  const [expandedToolCalls, setExpandedToolCalls] = useState<Set<string>>(new Set())
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const dropZoneRef = useRef<HTMLDivElement>(null)
 
   const selectedEmployee = employees.find((e) => e.id === selectedEmployeeId)
   const activeConversation = conversations.find((c) => c.id === selectedConversationId)
-  const currentStreaming = selectedConversationId ? streamingContent[selectedConversationId] : undefined
+  const currentParts = selectedConversationId ? streamingParts[selectedConversationId] : undefined
+  const hasStreamingContent = currentParts && currentParts.length > 0
 
   useEffect(() => {
     if (selectedEmployeeId) {
@@ -61,7 +53,7 @@ export function ChatPage() {
     if (!isUserScrolledUp) {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
     }
-  }, [activeConversation?.messages, currentStreaming, toolCallNotices, isUserScrolledUp])
+  }, [activeConversation?.messages, currentParts, isUserScrolledUp])
 
   // Reset scroll lock when conversation changes or sending completes
   useEffect(() => {
@@ -85,37 +77,9 @@ export function ChatPage() {
     }
   }, [selectedConversationId, activeConversation?.messages?.length, getTokenCount])
 
-  // Listen for file-written events
+  // Reset expanded tool calls when conversation changes
   useEffect(() => {
-    if (!window.api?.chat?.onFileWritten) return
-    const unsub = window.api.chat.onFileWritten((data) => {
-      if (data.conversationId === selectedConversationId) {
-        setWrittenFiles(prev => [...prev, { path: data.path, content: data.content }])
-      }
-    })
-    return () => { unsub() }
-  }, [selectedConversationId])
-
-  // Listen for tool call events
-  useEffect(() => {
-    if (!window.api?.chat?.onToolCall) return
-    const unsub = window.api.chat.onToolCall((data) => {
-      if (data.conversationId === selectedConversationId) {
-        setToolCallNotices(prev => [...prev, {
-          id: `tc-${Date.now()}-${Math.random()}`,
-          tool: data.tool,
-          summary: data.summary,
-          detail: data.detail
-        }])
-      }
-    })
-    return () => { unsub() }
-  }, [selectedConversationId])
-
-  // Clear tool call notices when conversation changes
-  useEffect(() => {
-    setToolCallNotices([])
-    setWrittenFiles([])
+    setExpandedToolCalls(new Set())
   }, [selectedConversationId])
 
   const handlePickFiles = useCallback(async () => {
@@ -188,7 +152,7 @@ export function ChatPage() {
     if (!convId) return
 
     setIsSending(true)
-    setToolCallNotices([])
+    setExpandedToolCalls(new Set())
     try {
       await sendMessage(convId, msg)
     } finally {
@@ -225,8 +189,38 @@ export function ChatPage() {
     if (tool === 'save_memory') return <Brain className="w-3.5 h-3.5 text-violet-400" />
     if (tool === 'create_knowledge_doc' || tool === 'update_knowledge_doc') return <FileText className="w-3.5 h-3.5 text-sky-400" />
     if (tool === 'delegate_task' || tool === 'message_employee') return <Users className="w-3.5 h-3.5 text-flame-400" />
-    return <FileText className="w-3.5 h-3.5 text-text-tertiary" />
+    if (tool === 'Read' || tool === 'Grep' || tool === 'Glob') return <Search className="w-3.5 h-3.5 text-sky-400" />
+    if (tool === 'Edit' || tool === 'Write') return <Edit3 className="w-3.5 h-3.5 text-emerald-400" />
+    if (tool === 'Bash') return <Terminal className="w-3.5 h-3.5 text-amber-400" />
+    if (tool === 'WebSearch' || tool === 'WebFetch') return <Globe className="w-3.5 h-3.5 text-blue-400" />
+    if (tool === 'execute_code') return <Code className="w-3.5 h-3.5 text-amber-400" />
+    if (tool === 'web_search') return <Search className="w-3.5 h-3.5 text-blue-400" />
+    if (tool === 'web_browse') return <Globe className="w-3.5 h-3.5 text-blue-400" />
+    if (tool === 'read_file') return <FileText className="w-3.5 h-3.5 text-sky-400" />
+    if (tool === 'write_file') return <Edit3 className="w-3.5 h-3.5 text-emerald-400" />
+    return <Code className="w-3.5 h-3.5 text-text-tertiary" />
   }
+
+  const toggleToolCallExpanded = (id: string) => {
+    setExpandedToolCalls(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const handleFileDownload = (path: string, content: string) => {
+    const blob = new Blob([content], { type: 'text/plain' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = path.split('/').pop() || 'file'
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const isImageFile = (path: string) => /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(path)
 
   // No employee selected -- show employee picker
   if (!selectedEmployeeId) {
@@ -406,35 +400,8 @@ export function ChatPage() {
               {activeConversation.messages.map((msg) => (
                 <MessageBubble key={msg.id} message={msg} employeeName={selectedEmployee?.name} employeeAvatar={selectedEmployee?.avatar} />
               ))}
-              {/* Tool call notices (inline during streaming) */}
-              {toolCallNotices.map((notice) => (
-                <div
-                  key={notice.id}
-                  className="rounded-xl bg-white/[0.03] border border-border-default animate-fade-in"
-                  style={{ maxWidth: '480px' }}
-                >
-                  <button
-                    className="flex items-center w-full cursor-pointer text-left transition-colors hover:bg-white/[0.02] rounded-xl"
-                    style={{ gap: '10px', padding: '8px 14px' }}
-                    onClick={() => notice.detail && setToolCallNotices(prev =>
-                      prev.map(n => n.id === notice.id ? { ...n, expanded: !n.expanded } : n)
-                    )}
-                  >
-                    {getToolIcon(notice.tool)}
-                    <span className="text-[12px] text-text-tertiary flex-1">{notice.summary}</span>
-                    {notice.detail && (
-                      <ChevronDown className={`w-3 h-3 text-text-tertiary transition-transform duration-200 ${notice.expanded ? 'rotate-180' : ''}`} />
-                    )}
-                  </button>
-                  {notice.expanded && notice.detail && (
-                    <div className="border-t border-border-default" style={{ padding: '10px 14px' }}>
-                      <pre className="text-[12px] text-text-secondary whitespace-pre-wrap font-mono leading-relaxed">{notice.detail}</pre>
-                    </div>
-                  )}
-                </div>
-              ))}
               {/* Thinking indicator — shows when waiting for response */}
-              {isSending && !currentStreaming && (
+              {isSending && !hasStreamingContent && (
                 <div className="flex animate-fade-in" style={{ gap: '14px' }}>
                   <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-bg-elevated text-sm shrink-0">
                     {selectedEmployee?.avatar}
@@ -453,50 +420,102 @@ export function ChatPage() {
                   </div>
                 </div>
               )}
-              {currentStreaming && currentStreaming.length > 0 && !activeConversation.messages.find(m => m.role === 'assistant' && m.content === currentStreaming) && (
+              {/* Unified streaming turn — text, tool calls, files all chronological */}
+              {hasStreamingContent && (
                 <div className="flex animate-fade-in" style={{ gap: '14px' }}>
-                  <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-bg-elevated text-sm shrink-0">
+                  <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-bg-elevated text-sm shrink-0" style={{ marginTop: '2px' }}>
                     {selectedEmployee?.avatar}
                   </div>
-                  <div className="flex-1 max-w-2xl">
-                    <div className="rounded-2xl rounded-tl-lg bg-bg-elevated border border-border-default" style={{ padding: '12px 16px' }}>
-                      <div className="chat-markdown">
-                        <ReactMarkdown>{currentStreaming}</ReactMarkdown>
-                      </div>
-                    </div>
+                  <div className="flex-1 max-w-2xl flex flex-col" style={{ gap: '6px' }}>
+                    {currentParts!.map((part, i) => {
+                      if (part.type === 'text') {
+                        return (
+                          <div key={`text-${i}`} className="rounded-2xl rounded-tl-lg bg-bg-elevated border border-border-default" style={{ padding: '12px 16px' }}>
+                            <div className="chat-markdown">
+                              <ReactMarkdown>{part.content}</ReactMarkdown>
+                            </div>
+                          </div>
+                        )
+                      }
+                      if (part.type === 'tool_call') {
+                        const isExpanded = expandedToolCalls.has(part.id)
+                        return (
+                          <div
+                            key={part.id}
+                            className="rounded-xl bg-white/[0.03] border-l-2 border-border-default overflow-hidden"
+                            style={{ borderLeftColor: 'rgba(249,115,22,0.4)' }}
+                          >
+                            <button
+                              className="flex items-center w-full cursor-pointer text-left transition-colors hover:bg-white/[0.02]"
+                              style={{ gap: '8px', padding: '6px 12px' }}
+                              onClick={() => part.detail && toggleToolCallExpanded(part.id)}
+                            >
+                              {getToolIcon(part.tool)}
+                              <span className="text-[12px] text-text-tertiary flex-1 truncate">{part.summary}</span>
+                              {part.detail && (
+                                <ChevronDown className={`w-3 h-3 text-text-tertiary transition-transform duration-200 shrink-0 ${isExpanded ? 'rotate-180' : ''}`} />
+                              )}
+                            </button>
+                            {isExpanded && part.detail && (
+                              <div className="border-t border-white/[0.06]" style={{ padding: '8px 12px' }}>
+                                <pre className="text-[11px] text-text-secondary whitespace-pre-wrap font-mono leading-relaxed">{part.detail}</pre>
+                              </div>
+                            )}
+                          </div>
+                        )
+                      }
+                      if (part.type === 'file_written') {
+                        const filename = part.path.split('/').pop() || 'file'
+                        if (isImageFile(part.path)) {
+                          return (
+                            <div key={`file-${i}`} className="rounded-xl overflow-hidden border border-border-default">
+                              <img
+                                src={`file://${part.path}`}
+                                alt={filename}
+                                style={{ maxWidth: '100%', maxHeight: '400px', display: 'block' }}
+                              />
+                              <div className="flex items-center bg-bg-elevated" style={{ gap: '8px', padding: '8px 12px' }}>
+                                <FileText className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                                <span className="text-[12px] text-text-secondary flex-1 truncate">{filename}</span>
+                                <button
+                                  onClick={() => handleFileDownload(part.path, part.content)}
+                                  className="flex items-center text-[11px] text-emerald-400 hover:text-emerald-300 transition-colors cursor-pointer"
+                                  style={{ gap: '4px' }}
+                                >
+                                  <Download className="w-3 h-3" />
+                                  Save
+                                </button>
+                              </div>
+                            </div>
+                          )
+                        }
+                        return (
+                          <div
+                            key={`file-${i}`}
+                            className="flex items-center rounded-xl bg-emerald-500/[0.06] border border-emerald-500/20"
+                            style={{ gap: '12px', padding: '10px 14px' }}
+                          >
+                            <FileText className="w-4 h-4 text-emerald-400 shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-[13px] text-text-primary truncate">{filename}</p>
+                              <p className="text-[11px] text-text-tertiary truncate">{part.path}</p>
+                            </div>
+                            <button
+                              onClick={() => handleFileDownload(part.path, part.content)}
+                              className="flex items-center text-[11px] text-emerald-400 hover:text-emerald-300 transition-colors cursor-pointer"
+                              style={{ gap: '4px' }}
+                            >
+                              <Download className="w-3.5 h-3.5" />
+                              Download
+                            </button>
+                          </div>
+                        )
+                      }
+                      return null
+                    })}
                   </div>
                 </div>
               )}
-              {/* Written file cards */}
-              {writtenFiles.map((file, i) => (
-                <div
-                  key={`file-${i}`}
-                  className="flex items-center rounded-xl bg-emerald-500/[0.06] border border-emerald-500/20 animate-fade-in"
-                  style={{ gap: '12px', padding: '12px 16px' }}
-                >
-                  <FileText className="w-4 h-4 text-emerald-400 shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-[13px] text-text-primary truncate">{file.path.split('/').pop()}</p>
-                    <p className="text-[11px] text-text-tertiary truncate">{file.path}</p>
-                  </div>
-                  <button
-                    onClick={() => {
-                      const blob = new Blob([file.content], { type: 'text/plain' })
-                      const url = URL.createObjectURL(blob)
-                      const a = document.createElement('a')
-                      a.href = url
-                      a.download = file.path.split('/').pop() || 'file'
-                      a.click()
-                      URL.revokeObjectURL(url)
-                    }}
-                    className="flex items-center text-[11px] text-emerald-400 hover:text-emerald-300 transition-colors cursor-pointer"
-                    style={{ gap: '4px' }}
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    Download
-                  </button>
-                </div>
-              ))}
               <div ref={messagesEndRef} />
             </div>
 

@@ -288,13 +288,15 @@ export function runClaudeCode(options: RunOptions): { promise: Promise<string>; 
       for (const line of lines) {
         if (!line.trim()) continue
         try {
-          const msg: ClaudeStreamMessage = JSON.parse(line)
+          const msg = JSON.parse(line) as Record<string, unknown>
           handleStreamMessage(msg)
         } catch {
           // Skip malformed JSON lines
         }
       }
     })
+
+    let prevLen = 0
 
     function handleStreamMessage(msg: Record<string, unknown>) {
       const type = msg.type as string
@@ -307,7 +309,11 @@ export function runClaudeCode(options: RunOptions): { promise: Promise<string>; 
           const textParts = content.filter(c => c.type === 'text' && c.text).map(c => c.text)
           if (textParts.length > 0) {
             accumulated = textParts.join('')
-            onStream(accumulated)
+            // Send only the new delta
+            if (accumulated.length > prevLen) {
+              onStream(accumulated.slice(prevLen))
+              prevLen = accumulated.length
+            }
           }
 
           // Detect tool use blocks
@@ -325,8 +331,11 @@ export function runClaudeCode(options: RunOptions): { promise: Promise<string>; 
 
       // Handle final result
       if (type === 'result' && msg.result) {
-        accumulated = msg.result as string
-        onStream(accumulated)
+        const resultText = msg.result as string
+        if (resultText.length > prevLen) {
+          onStream(resultText.slice(prevLen))
+        }
+        accumulated = resultText
       }
     }
 
@@ -344,7 +353,7 @@ export function runClaudeCode(options: RunOptions): { promise: Promise<string>; 
       // Process any remaining buffer
       if (buffer.trim()) {
         try {
-          const msg: ClaudeStreamMessage = JSON.parse(buffer)
+          const msg = JSON.parse(buffer) as Record<string, unknown>
           handleStreamMessage(msg)
         } catch {}
       }

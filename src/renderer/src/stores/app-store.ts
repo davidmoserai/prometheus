@@ -1,5 +1,11 @@
 import { create } from 'zustand'
 
+// Streaming parts for chronological rendering of text + tool calls + files
+export type StreamPart =
+  | { type: 'text'; content: string }
+  | { type: 'tool_call'; id: string; tool: string; summary: string; detail?: string; status: 'running' | 'done' }
+  | { type: 'file_written'; path: string; content: string }
+
 interface Company {
   id: string
   name: string
@@ -201,7 +207,7 @@ interface AppState {
   selectedConversationId: string | null
   isCreatingEmployee: boolean
   editingEmployeeId: string | null
-  streamingContent: Record<string, string>
+  streamingParts: Record<string, StreamPart[]>
   isLoading: boolean
   sidebarCollapsed: boolean
 
@@ -213,8 +219,9 @@ interface AppState {
   setSelectedConversation: (id: string | null) => void
   setCreatingEmployee: (creating: boolean) => void
   setEditingEmployee: (id: string | null) => void
-  setStreamingContent: (convId: string, content: string) => void
-  clearStreamingContent: (convId: string) => void
+  appendStreamText: (convId: string, delta: string) => void
+  appendStreamPart: (convId: string, part: StreamPart) => void
+  clearStreamingParts: (convId: string) => void
 
   // Actions — Companies
   loadCompanies: () => Promise<void>
@@ -306,7 +313,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   selectedConversationId: null,
   isCreatingEmployee: false,
   editingEmployeeId: null,
-  streamingContent: {},
+  streamingParts: {},
   isLoading: false,
   sidebarCollapsed: false,
 
@@ -318,14 +325,26 @@ export const useAppStore = create<AppState>((set, get) => ({
   setSelectedConversation: (id) => set({ selectedConversationId: id }),
   setCreatingEmployee: (creating) => set({ isCreatingEmployee: creating }),
   setEditingEmployee: (id) => set({ editingEmployeeId: id }),
-  setStreamingContent: (convId, content) =>
-    set((state) => ({
-      streamingContent: { ...state.streamingContent, [convId]: content }
-    })),
-  clearStreamingContent: (convId) =>
+  appendStreamText: (convId, delta) =>
     set((state) => {
-      const { [convId]: _, ...rest } = state.streamingContent
-      return { streamingContent: rest }
+      const parts = [...(state.streamingParts[convId] || [])]
+      const last = parts[parts.length - 1]
+      if (last && last.type === 'text') {
+        parts[parts.length - 1] = { ...last, content: last.content + delta }
+      } else {
+        parts.push({ type: 'text', content: delta })
+      }
+      return { streamingParts: { ...state.streamingParts, [convId]: parts } }
+    }),
+  appendStreamPart: (convId, part) =>
+    set((state) => {
+      const parts = [...(state.streamingParts[convId] || []), part]
+      return { streamingParts: { ...state.streamingParts, [convId]: parts } }
+    }),
+  clearStreamingParts: (convId) =>
+    set((state) => {
+      const { [convId]: _, ...rest } = state.streamingParts
+      return { streamingParts: rest }
     }),
 
   // Companies
@@ -497,7 +516,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         )
       }))
     }
-    get().clearStreamingContent(conversationId)
+    get().clearStreamingParts(conversationId)
   },
 
   uploadFile: async (conversationId, filePath) => {

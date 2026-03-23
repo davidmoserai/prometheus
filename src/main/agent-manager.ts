@@ -554,7 +554,7 @@ export class AgentManager {
     let accumulated = ''
     for await (const chunk of result.textStream) {
       accumulated += chunk
-      onStream(accumulated)
+      onStream(chunk) // Send delta only, not accumulated
     }
 
     return accumulated
