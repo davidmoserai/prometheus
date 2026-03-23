@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Plus, Search, FileText, Tag, Pencil, Trash2, ArrowLeft, Save, X, BookOpen } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -6,12 +6,16 @@ import { Textarea } from '@/components/ui/textarea'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { useAppStore, type KnowledgeDocument } from '@/stores/app-store'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 
 export function KnowledgePage() {
-  const { knowledge, createKnowledge, updateKnowledge, deleteKnowledge } = useAppStore()
+  const { knowledge, createKnowledge, updateKnowledge, deleteKnowledge, loadKnowledge } = useAppStore()
+
+  useEffect(() => { loadKnowledge() }, [loadKnowledge])
   const [search, setSearch] = useState('')
   const [editing, setEditing] = useState<KnowledgeDocument | null>(null)
   const [isCreating, setIsCreating] = useState(false)
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
 
   const filtered = knowledge.filter(
     (d) =>
@@ -41,6 +45,7 @@ export function KnowledgePage() {
   }
 
   return (
+    <>
     <div className="h-full overflow-y-auto">
       <div className="relative max-w-[960px] mx-auto" style={{ padding: '48px' }}>
         {/* Ambient orbs */}
@@ -106,7 +111,7 @@ export function KnowledgePage() {
                         role="button"
                         onClick={(e) => {
                           e.stopPropagation()
-                          deleteKnowledge(doc.id)
+                          setDeleteConfirmId(doc.id)
                         }}
                         className="p-2 rounded-lg text-text-tertiary hover:text-ember-400 hover:bg-ember-500/10 transition-all cursor-pointer"
                       >
@@ -152,6 +157,19 @@ export function KnowledgePage() {
         )}
       </div>
     </div>
+    <ConfirmDialog
+      open={!!deleteConfirmId}
+      title="Delete knowledge document?"
+      description="This will permanently delete this document. This cannot be undone."
+      confirmLabel="Delete"
+      variant="destructive"
+      onConfirm={() => {
+        if (deleteConfirmId) deleteKnowledge(deleteConfirmId)
+        setDeleteConfirmId(null)
+      }}
+      onCancel={() => setDeleteConfirmId(null)}
+    />
+    </>
   )
 }
 

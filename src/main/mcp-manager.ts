@@ -65,6 +65,7 @@ function watchStderrForUrls(client: MCPClient, serverId: string): void {
 export class MCPManager {
   private clients: Map<string, MCPClient> = new Map()
   private toolCache: Map<string, Record<string, Tool>> = new Map()
+  private resolvedCommands: Map<string, { command: string; args: string[] }> = new Map()
 
   /**
    * Connect to an MCP server and discover its tools.
@@ -81,6 +82,9 @@ export class MCPManager {
   }
 
   private _resolveCommand(config: MCPServerConfig): { command: string; args: string[] } {
+    const cached = this.resolvedCommands.get(config.id)
+    if (cached) return cached
+
     if (config.command === 'npx') {
       try {
         const env = mcpEnv(config.env)
@@ -106,7 +110,9 @@ export class MCPManager {
               const head = readFileSync(fullBinPath, 'utf-8').slice(0, 100)
               if (!head.startsWith('#!') && /^(import |require\(|const |"use strict")/.test(head)) {
                 console.log(`MCP "${config.name}": binary missing shebang, using node directly`)
-                return { command: 'node', args: [fullBinPath] }
+                const result = { command: 'node', args: [fullBinPath] }
+                this.resolvedCommands.set(config.id, result)
+                return result
               }
             }
           }
@@ -115,7 +121,9 @@ export class MCPManager {
         // Fall through to default
       }
     }
-    return { command: config.command, args: config.args }
+    const result = { command: config.command, args: config.args }
+    this.resolvedCommands.set(config.id, result)
+    return result
   }
 
   async connect(config: MCPServerConfig): Promise<string[]> {
@@ -207,6 +215,7 @@ export class MCPManager {
       }
       this.clients.delete(serverId)
       this.toolCache.delete(serverId)
+      this.resolvedCommands.delete(serverId)
     }
   }
 

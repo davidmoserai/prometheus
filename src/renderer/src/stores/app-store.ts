@@ -220,7 +220,7 @@ interface AppState {
   setSidebarCollapsed: (collapsed: boolean) => void
   toggleSidebar: () => void
   setSelectedEmployee: (id: string | null) => void
-  setSelectedConversation: (id: string | null) => void
+  setSelectedConversation: (id: string | null) => Promise<void>
   setCreatingEmployee: (creating: boolean) => void
   setEditingEmployee: (id: string | null) => void
   appendStreamText: (convId: string, delta: string) => void
@@ -328,7 +328,17 @@ export const useAppStore = create<AppState>((set, get) => ({
   setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
   toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
   setSelectedEmployee: (id) => set({ selectedEmployeeId: id }),
-  setSelectedConversation: (id) => set({ selectedConversationId: id }),
+  setSelectedConversation: async (id) => {
+    set({ selectedConversationId: id })
+    if (!id) return
+    // Load full conversation with messages (listConversations only returns metadata)
+    const conv = await window.api.conversations.get(id)
+    if (conv) {
+      set((state) => ({
+        conversations: state.conversations.map(c => c.id === id ? conv : c)
+      }))
+    }
+  },
   setCreatingEmployee: (creating) => set({ isCreatingEmployee: creating }),
   setEditingEmployee: (id) => set({ editingEmployeeId: id }),
   appendStreamText: (convId, delta) =>
@@ -502,8 +512,14 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   // Conversations
   loadConversations: async (employeeId: string) => {
-    const conversations = await window.api.conversations.list(employeeId)
-    set({ conversations })
+    const fetched = await window.api.conversations.list(employeeId)
+    set((state) => ({
+      // Merge: keep existing conversation if it has more messages (e.g. streamed but not yet persisted)
+      conversations: fetched.map(fresh => {
+        const existing = state.conversations.find(c => c.id === fresh.id)
+        return existing && existing.messages.length > fresh.messages.length ? existing : fresh
+      })
+    }))
   },
 
   createConversation: async (employeeId: string) => {

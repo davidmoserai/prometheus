@@ -11,6 +11,9 @@ import type { MCPManager } from './mcp-manager'
 import type { ConversationService } from './conversation-service'
 import { runClaudeCode, TOOL_MAP } from './claude-code-runner'
 import { startApprovalServer } from './claude-code-approval-server'
+// ⚠️  CLAUDE CODE ONLY: internal HTTP API bridging memory/knowledge tools to Claude Code's MCP server.
+// Mastra agents use native createTool() functions and never touch this import.
+import { startInternalServer } from './prometheus-internal-server'
 import { getMemory, isSemanticRecallEnabled } from './memory'
 import type { Memory } from '@mastra/memory'
 
@@ -697,6 +700,15 @@ export class AgentManager {
       }
     }
 
+    // ⚠️  CLAUDE CODE ONLY: start internal HTTP API server for memory/knowledge tools.
+    // This bridges the prometheus-internal MCP server subprocess (running inside Claude Code)
+    // back to our main process Memory instance and EmployeeStore.
+    // Mastra agents never reach this code — they use native createTool() functions instead.
+    const mem = getMemory()
+    const internalServer = mem
+      ? await startInternalServer({ memory: mem, store: this.store })
+      : null
+
     // Start approval HTTP server if any tools need per-invocation approval
     let approvalServer: { port: number; close: () => void } | null = null
     if (requiresApprovalClaudeNames.size > 0) {
@@ -774,6 +786,10 @@ export class AgentManager {
         mcpToolNames,
         conversationHistory: history.length > 0 ? history : undefined,
         approvalServerPort: approvalServer?.port,
+        // ⚠️  CLAUDE CODE ONLY: internal MCP server context for memory/knowledge tools
+        internalServerPort: internalServer?.port,
+        internalEmployeeId: employee.id,
+        internalConversationId: conversationId,
         onStream,
         onToolCall: filteredOnToolCall,
         onFileWritten
@@ -781,6 +797,7 @@ export class AgentManager {
       return await promise
     } finally {
       approvalServer?.close()
+      internalServer?.close()
     }
   }
 
