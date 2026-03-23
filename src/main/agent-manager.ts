@@ -8,13 +8,16 @@ import { z } from 'zod'
 import { EmployeeStore } from './store'
 import { ChatMessage, Employee, ProviderConfig, Task, TaskMessage, TOOL_IDS } from './types'
 import type { MCPManager } from './mcp-manager'
+import type { ConversationService } from './conversation-service'
 import { runClaudeCode } from './claude-code-runner'
+import { getMemory, isSemanticRecallEnabled } from './memory'
+import type { Memory } from '@mastra/memory'
 
 // ============================================================
 // Mastra model string/object builders
 // ============================================================
 
-type MastraModel = string | { id: string; url: string; apiKey?: string; headers?: Record<string, string> }
+type MastraModel = string | { id: `${string}/${string}`; url: string; apiKey?: string; headers?: Record<string, string> }
 
 /**
  * Map our provider + model config to a Mastra-compatible model reference.
@@ -59,7 +62,7 @@ function buildModelRef(provider: ProviderConfig, model: string): MastraModel {
 
     default:
       return {
-        id: model.includes('/') ? model : `openai/${model}`,
+        id: (model.includes('/') ? model : `openai/${model}`) as `${string}/${string}`,
         url: provider.baseUrl || 'https://api.openai.com/v1',
         apiKey: provider.apiKey
       }
@@ -98,7 +101,8 @@ function buildMastraTools(
   onDelegateTask: (fromEmployee: Employee, args: Record<string, string>, conversationId?: string) => { task: Task; message: string },
   onMessageEmployee?: (fromEmployee: Employee, toEmployeeId: string, message: string) => Promise<string>,
   onToolCall?: (data: { tool: string; summary: string; detail?: string }) => void,
-  onFileWritten?: (data: { conversationId: string; path: string; content: string }) => void
+  onFileWritten?: (data: { conversationId: string; path: string; content: string }) => void,
+  memory?: Memory
 ): Record<string, ReturnType<typeof createTool>> {
   const tools: Record<string, ReturnType<typeof createTool>> = {}
   const enabledToolIds = new Set(
@@ -150,19 +154,54 @@ function buildMastraTools(
     })
   }
 
-  // Memory tools — always available
-  tools.save_memory = createTool({
-    id: 'save_memory',
-    description: 'Save important facts, decisions, and preferences to your persistent memory. Your memory persists across conversations. Pass the full updated memory content — it replaces your previous memory entirely.',
-    inputSchema: z.object({
-      content: z.string().describe('Your full updated memory (replaces previous). Include all facts you want to remember.')
-    }),
-    execute: async (input) => {
-      onToolCall?.({ tool: 'save_memory', summary: 'Saved to persistent memory', detail: input.content })
-      store.updateEmployeeMemory(employee.id, input.content)
-      return { result: 'Memory saved successfully. Your updated memory will be included in future conversations.' }
-    }
-  })
+  // Semantic search tool — allows agents to search past conversations on-demand
+  // (Mastra's update_working_memory tool is auto-provided by the Agent when memory is attached)
+  if (memory && conversationId && isSemanticRecallEnabled()) {
+    tools.search_memory = createTool({
+      id: 'search_memory',
+      description: 'Search through your past conversations for relevant information using semantic similarity. Use this when you need to recall something from a previous conversation.',
+      inputSchema: z.object({
+        query: z.string().describe('What to search for in past conversations')
+      }),
+      execute: async (input) => {
+        onToolCall?.({ tool: 'search_memory', summary: `Searching memory: ${input.query.slice(0, 60)}` })
+        try {
+          // threadId is required by the API but scope: 'resource' ensures cross-conversation search
+          const results = await memory.recall({
+            threadId: conversationId,
+            vectorSearchString: input.query,
+            threadConfig: {
+              semanticRecall: { topK: 5, messageRange: 1, scope: 'resource' },
+              lastMessages: false,
+            }
+          })
+          if (results.messages.length === 0) return { result: 'No relevant memories found.' }
+          const formatted = results.messages
+            .map(m => `[${m.role}]: ${typeof m.content === 'string' ? m.content : JSON.stringify(m.content)}`)
+            .join('\n\n')
+          return { result: formatted }
+        } catch (err) {
+          return { result: `Memory search failed: ${err instanceof Error ? err.message : 'Unknown error'}` }
+        }
+      }
+    })
+  }
+
+  // Fallback: legacy save_memory when Mastra memory system isn't available
+  if (!memory) {
+    tools.save_memory = createTool({
+      id: 'save_memory',
+      description: 'Save important facts, decisions, and preferences to your persistent memory.',
+      inputSchema: z.object({
+        content: z.string().describe('Your full updated memory (replaces previous). Include all facts you want to remember.')
+      }),
+      execute: async (input) => {
+        onToolCall?.({ tool: 'save_memory', summary: 'Saved to persistent memory', detail: input.content })
+        store.updateEmployeeMemory(employee.id, input.content)
+        return { result: 'Memory saved successfully.' }
+      }
+    })
+  }
 
   tools.create_knowledge_doc = createTool({
     id: 'create_knowledge_doc',
@@ -399,15 +438,28 @@ function buildMastraTools(
 export class AgentManager {
   private store: EmployeeStore
   private mcpManager?: MCPManager
+  private convService?: ConversationService
   private onTaskUpdate?: (task: Task) => void
   private onFileWritten?: (data: { conversationId: string; path: string; content: string }) => void
   private onToolCall?: (data: { conversationId: string; tool: string; summary: string; detail?: string }) => void
   private onApprovalRequest?: (data: { conversationId: string; approvalId: string; tool: string; args: Record<string, unknown>; summary: string }) => void
   private pendingApprovals: Map<string, { resolve: (approved: boolean) => void; timer: ReturnType<typeof setTimeout> }> = new Map()
 
-  constructor(store: EmployeeStore, mcpManager?: MCPManager) {
+  constructor(store: EmployeeStore, mcpManager?: MCPManager, convService?: ConversationService) {
     this.store = store
     this.mcpManager = mcpManager
+    this.convService = convService
+  }
+
+  // Conversation helpers — delegate to ConversationService (required)
+  private async addMessage(conversationId: string, message: Omit<ChatMessage, 'id' | 'timestamp'>): Promise<ChatMessage> {
+    if (!this.convService) throw new Error('ConversationService not initialized')
+    return this.convService.addMessage(conversationId, message)
+  }
+
+  private async getConversation(conversationId: string) {
+    if (!this.convService) throw new Error('ConversationService not initialized')
+    return this.convService.getConversation(conversationId)
   }
 
   /** Set callback for notifying frontend when tasks are created/updated */
@@ -455,11 +507,11 @@ export class AgentManager {
     onStream: (chunk: string) => void,
     onMessageStored?: (msg: ChatMessage) => void
   ): Promise<ChatMessage> {
-    // Store user message and notify frontend immediately
-    const userMsg = this.store.addMessage(conversationId, { role: 'user', content })
+    // Store user message via conversation service and notify frontend immediately
+    const userMsg = await this.addMessage(conversationId, { role: 'user', content })
     onMessageStored?.(userMsg)
 
-    const conversation = this.store.getConversation(conversationId)
+    const conversation = await this.getConversation(conversationId)
     if (!conversation) throw new Error('Conversation not found')
 
     const employee = this.store.getEmployee(conversation.employeeId)
@@ -470,7 +522,7 @@ export class AgentManager {
 
     if (!provider) {
       const errorMsg = `Provider "${employee.provider}" not found. Check your settings.`
-      const msg = this.store.addMessage(conversationId, { role: 'assistant', content: errorMsg })
+      const msg = await this.addMessage(conversationId, { role: 'assistant', content: errorMsg })
       onStream(errorMsg)
       return msg
     }
@@ -478,19 +530,20 @@ export class AgentManager {
     // Claude Code provider uses CLI auth, not API key
     if (!provider.apiKey && provider.id !== 'ollama' && provider.id !== 'claude-code') {
       const errorMsg = `No API key configured for ${provider.name}. Go to Settings to add your API key.`
-      const msg = this.store.addMessage(conversationId, { role: 'assistant', content: errorMsg })
+      const msg = await this.addMessage(conversationId, { role: 'assistant', content: errorMsg })
       onStream(errorMsg)
       return msg
     }
 
-    // Build system prompt with knowledge documents and memory
-    const systemPrompt = this.buildSystemPrompt(employee)
+    // Build system prompt with knowledge documents
+    const systemPrompt = await this.buildSystemPrompt(employee, conversationId)
 
-    // Build message history from conversation
-    const messages = conversation.messages.map(m => ({
-      role: m.role as 'user' | 'assistant' | 'system',
-      content: m.content
-    }))
+    // Get Mastra memory instance (if available)
+    let mem: Memory | undefined
+    try { mem = getMemory() } catch { /* unavailable */ }
+
+    // Only pass latest user message — Mastra retrieves history from LibSQL via threadId
+    const messages: { role: 'user' | 'assistant' | 'system'; content: string }[] = [{ role: 'user', content }]
 
     // Build tools via closure
     const contactable = this.getContactableEmployees(employee)
@@ -505,7 +558,8 @@ export class AgentManager {
       (fromEmp, args, convId) => this.handleDelegateTask(fromEmp, args, convId),
       (fromEmp, toId, msg) => this.executeAgentMessage(fromEmp, toId, msg),
       toolCallCb,
-      this.onFileWritten
+      this.onFileWritten,
+      mem
     )
 
     // Merge MCP tools that the employee has enabled
@@ -520,11 +574,15 @@ export class AgentManager {
       let responseText: string
 
       if (provider.id === 'claude-code') {
-        // Route to Claude Code CLI subprocess
+        // Claude Code needs full history (no Mastra memory integration)
+        const fullMessages = conversation.messages.map((m: ChatMessage) => ({
+          role: m.role as 'user' | 'assistant' | 'system',
+          content: m.content
+        }))
         responseText = await this.runClaudeCodeAgent(
           employee,
           systemPrompt,
-          messages,
+          fullMessages,
           onStream,
           toolCallCb ? (data) => toolCallCb(data) : undefined,
           conversationId ? (data) => this.onFileWritten?.({ conversationId, ...data }) : undefined
@@ -536,15 +594,16 @@ export class AgentManager {
           systemPrompt,
           messages,
           onStream,
-          Object.keys(allTools).length > 0 ? allTools : undefined
+          Object.keys(allTools).length > 0 ? allTools : undefined,
+          mem
         )
       }
 
-      const msg = this.store.addMessage(conversationId, { role: 'assistant', content: responseText })
+      const msg = await this.addMessage(conversationId, { role: 'assistant', content: responseText })
       return msg
     } catch (error) {
       const errorMsg = `Failed to get response: ${error instanceof Error ? error.message : 'Unknown error'}. Check your API key and model settings.`
-      const msg = this.store.addMessage(conversationId, { role: 'assistant', content: errorMsg })
+      const msg = await this.addMessage(conversationId, { role: 'assistant', content: errorMsg })
       onStream(errorMsg)
       return msg
     }
@@ -560,33 +619,39 @@ export class AgentManager {
     systemPrompt: string,
     messages: { role: 'user' | 'assistant' | 'system'; content: string }[],
     onStream: (chunk: string) => void,
-    tools?: Record<string, ReturnType<typeof createTool>>
+    tools?: Record<string, ReturnType<typeof createTool>>,
+    mem?: Memory
   ): Promise<string> {
     const modelRef = buildModelRef(provider, employee.model)
     const hasTools = !!tools && Object.keys(tools).length > 0
     const providerOptions = buildProviderOptions(provider, hasTools)
 
-    // Create a per-request agent with the right model, instructions, and tools
+    // Attach memory for working memory injection (but don't pass threadId —
+    // we handle message persistence ourselves via ConversationService)
     const agent = new Agent({
       id: `employee-${employee.id}`,
       name: employee.name,
       instructions: systemPrompt,
       model: modelRef,
       tools: tools || {},
-      maxSteps: 5
+      memory: mem
     })
 
-    // Stream the response and accumulate text for the onStream callback
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const streamFn = agent.stream.bind(agent) as (messages: any, options?: any) => Promise<any>
-    const result = providerOptions
-      ? await streamFn(messages, { providerOptions })
-      : await streamFn(messages)
+    const streamOptions: Record<string, unknown> = {
+      maxSteps: 5,
+      // Pass resourceId for working memory injection, but NOT threadId
+      // (threadId triggers Mastra auto-persistence — we handle that via ConversationService)
+      resourceId: employee.id
+    }
+    if (providerOptions) streamOptions.providerOptions = providerOptions
+    const result = await streamFn(messages, streamOptions)
 
     let accumulated = ''
     for await (const chunk of result.textStream) {
       accumulated += chunk
-      onStream(chunk) // Send delta only, not accumulated
+      onStream(chunk)
     }
 
     return accumulated
@@ -686,24 +751,20 @@ export class AgentManager {
       messages: []
     })
 
-    // Attach file paths from conversation to the task context
-    if (conversationId) {
-      const conv = this.store.getConversation(conversationId)
-      if (conv) {
+    // Attach file paths from conversation to the task context (async, fire-and-forget)
+    if (conversationId && this.convService) {
+      this.convService.getConversation(conversationId).then(conv => {
+        if (!conv) return
         const attachedFiles: string[] = []
         for (const msg of conv.messages) {
-          // Check for inline attachment markers
           const matches = msg.content.match(/\[Attached: .+?\] \(path: (.+?)\)/g) || []
           for (const match of matches) {
             const pathMatch = match.match(/\(path: (.+?)\)/)
             if (pathMatch) attachedFiles.push(pathMatch[1])
           }
-          // Check for structured attachments on the message
           if (msg.attachments) {
             for (const att of msg.attachments) {
-              if (!attachedFiles.includes(att.path)) {
-                attachedFiles.push(att.path)
-              }
+              if (!attachedFiles.includes(att.path)) attachedFiles.push(att.path)
             }
           }
         }
@@ -713,7 +774,7 @@ export class AgentManager {
             context: task.context + `\n\nAttached files from the conversation:\n${fileList}`
           })
         }
-      }
+      }).catch(() => { /* ignore */ })
     }
 
     this.onTaskUpdate?.(task)
@@ -747,48 +808,44 @@ export class AgentManager {
     if (!provider.apiKey && provider.id !== 'ollama' && provider.id !== 'claude-code') throw new Error(`No API key for ${provider.name}`)
 
     // Find or create the agent-to-agent conversation
-    let conv = this.store.findAgentConversation(fromEmployee.id, toEmployeeId)
+    const companyId = this.store.getActiveCompanyId() || ''
+    if (!this.convService) throw new Error('ConversationService not initialized')
+    let conv = await this.convService.findAgentConversation(fromEmployee.id, toEmployeeId, companyId)
     if (!conv) {
-      conv = this.store.createConversation(fromEmployee.id)
-      // Update with peerEmployeeId and title
-      const conversations = this.store.listConversations(fromEmployee.id)
-      const created = conversations.find(c => c.id === conv!.id)
-      if (created) {
-        // We need to set peerEmployeeId — update the conversation data directly
-        const fullConv = this.store.getConversation(conv.id)
-        if (fullConv) {
-          (fullConv as { peerEmployeeId?: string }).peerEmployeeId = toEmployeeId
-          fullConv.title = `${fromEmployee.name} <> ${toEmployee.name}`
-        }
-      }
+      conv = await this.convService.createConversation(fromEmployee.id, companyId, toEmployeeId)
     }
 
     // Add the sender's message
-    this.store.addMessage(conv.id, {
+    await this.addMessage(conv.id, {
       role: 'user',
       content: `[From ${fromEmployee.name}]: ${message}`
     })
 
     // Build system prompt for target employee
-    const systemPrompt = this.buildSystemPrompt(toEmployee)
+    const systemPrompt = await this.buildSystemPrompt(toEmployee)
 
-    // Get conversation history
-    const updatedConv = this.store.getConversation(conv.id)
-    const messages = (updatedConv?.messages || []).map(m => ({
-      role: m.role as 'user' | 'assistant' | 'system',
-      content: m.content
-    }))
+    // Only pass latest message — Mastra retrieves history via threadId
+    const messages: { role: 'user' | 'assistant' | 'system'; content: string }[] = [
+      { role: 'user', content: `[From ${fromEmployee.name}]: ${message}` }
+    ]
 
     // Run target agent with no tools (simple response)
+    let mem: Memory | undefined
+    try { mem = getMemory() } catch { /* unavailable */ }
     let responseText: string
     if (provider.id === 'claude-code') {
-      responseText = await this.runClaudeCodeAgent(toEmployee, systemPrompt, messages, () => {})
+      const fullConv = await this.getConversation(conv.id)
+      const fullMessages = (fullConv?.messages || []).map((m: ChatMessage) => ({
+        role: m.role as 'user' | 'assistant' | 'system',
+        content: m.content
+      }))
+      responseText = await this.runClaudeCodeAgent(toEmployee, systemPrompt, fullMessages, () => {})
     } else {
-      responseText = await this.runAgent(provider, toEmployee, systemPrompt, messages, () => {}, undefined)
+      responseText = await this.runAgent(provider, toEmployee, systemPrompt, messages, () => {}, undefined, mem)
     }
 
     // Store the response
-    this.store.addMessage(conv.id, {
+    await this.addMessage(conv.id, {
       role: 'assistant',
       content: responseText
     })
@@ -806,18 +863,16 @@ export class AgentManager {
   /**
    * Count total tokens in a conversation.
    */
-  countConversationTokens(conversationId: string): number {
-    const conv = this.store.getConversation(conversationId)
-    if (!conv) return 0
-    const allText = conv.messages.map(m => m.content).join('')
-    return this.countTokens(allText)
+  async countConversationTokens(conversationId: string): Promise<number> {
+    if (!this.convService) throw new Error('ConversationService not initialized')
+    return this.convService.countTokens(conversationId)
   }
 
   /**
    * Compress a conversation by summarizing older messages.
    */
   async compressConversation(conversationId: string): Promise<void> {
-    const conv = this.store.getConversation(conversationId)
+    const conv = await this.getConversation(conversationId)
     if (!conv || conv.messages.length <= 4) return
 
     const employee = this.store.getEmployee(conv.employeeId)
@@ -859,7 +914,8 @@ export class AgentManager {
       timestamp: new Date().toISOString()
     }
 
-    this.store.replaceMessages(conversationId, [summaryMsg, ...toKeep])
+    if (!this.convService) throw new Error('ConversationService not initialized')
+    await this.convService.replaceMessages(conversationId, [summaryMsg, ...toKeep])
   }
 
   /**
@@ -886,7 +942,7 @@ export class AgentManager {
     const brief = `AGENT BRIEF\nTo: ${toEmployee.name} (${toEmployee.role})\nFrom: ${fromName}\nPriority: ${task.priority}\nDeadline: ${task.deadline || 'Not specified'}\n\nObjective:\n${task.objective}\n\nContext:\n${task.context}\n\nDeliverable:\n${task.deliverable}\n\nAcceptance Criteria:\n${task.acceptanceCriteria}\n\nEscalate to founder if:\n${task.escalateIf}`
 
     // Build system prompt for target employee
-    const systemPrompt = this.buildSystemPrompt(toEmployee)
+    const systemPrompt = await this.buildSystemPrompt(toEmployee)
 
     // Build tools for the target agent so they can read files, write files, etc.
     const contactable = this.getContactableEmployees(toEmployee)
@@ -927,6 +983,7 @@ export class AgentManager {
         }
       }
 
+      // No threadId passed — task conversations are ephemeral and stored in task.messages, not Mastra memory
       let responseText: string
       if (provider.id === 'claude-code') {
         responseText = await this.runClaudeCodeAgent(
@@ -1010,7 +1067,7 @@ export class AgentManager {
     if (!provider) throw new Error(`Provider "${toEmployee.provider}" not found in settings`)
     if (!provider.apiKey && provider.id !== 'ollama' && provider.id !== 'claude-code') throw new Error(`No API key for ${provider.name}`)
 
-    const systemPrompt = this.buildSystemPrompt(toEmployee)
+    const systemPrompt = await this.buildSystemPrompt(toEmployee)
 
     // Build tools for the agent
     const contactable = this.getContactableEmployees(toEmployee)
@@ -1086,19 +1143,20 @@ export class AgentManager {
   }
 
   /**
-   * Build the full system prompt including knowledge docs, memory, and team info.
+   * Build the full system prompt including knowledge docs, working memory, and team info.
    */
-  private buildSystemPrompt(employee: Employee): string {
+  private async buildSystemPrompt(employee: Employee, _conversationId?: string): Promise<string> {
     // Name and role at the top, then the custom system prompt
     let prompt = `You are ${employee.name}, ${employee.role}.\n\n`
     prompt += employee.systemPrompt || ''
 
-    // Append memory section
-    prompt += '\n\n---\n\n# Your Memory'
-    if (employee.memory) {
+    // Working memory is auto-injected by Mastra when memory is attached to the Agent.
+    // Fall back to legacy string only when Mastra memory isn't available.
+    let mastraMemAvailable = false
+    try { getMemory(); mastraMemAvailable = true } catch { /* unavailable */ }
+    if (!mastraMemAvailable && employee.memory) {
+      prompt += '\n\n---\n\n# Your Memory'
       prompt += `\n${employee.memory}`
-    } else {
-      prompt += '\nNo memories yet. Use save_memory to remember important things across conversations.'
     }
 
     // Append knowledge documents with IDs so agents can reference them
@@ -1135,7 +1193,10 @@ export class AgentManager {
     }
 
     // Memory and knowledge instructions
-    prompt += '\n\nYou have persistent memory across conversations. Save key facts, decisions, and preferences using save_memory when they come up — don\'t wait until the end of the conversation.'
+    prompt += '\n\nYou have persistent working memory across conversations. Use update_working_memory to save key facts, decisions, and preferences when they come up — don\'t wait until the end.'
+    if (isSemanticRecallEnabled()) {
+      prompt += ' Use search_memory when you need to recall something from a past conversation.'
+    }
     prompt += '\n\nIf the user tells you something that contradicts or updates information in your knowledge documents, update the document immediately using update_knowledge_doc. Don\'t ask — just update it and mention what you changed.'
     prompt += '\n\nYou can create new knowledge documents using create_knowledge_doc for important information that should persist.'
     prompt += '\nYou can use create_scheduled_task to set up recurring automated tasks.'
@@ -1163,8 +1224,9 @@ export class AgentManager {
       const assignment = this.findToolAssignment(employee, toolKey)
       if (!assignment?.requiresApproval) continue
 
-      const originalExecute = (tool as Record<string, unknown>).execute as (input: Record<string, unknown>) => Promise<Record<string, unknown>>
-      ;(tool as Record<string, unknown>).execute = async (input: Record<string, unknown>) => {
+      const toolAsAny = tool as unknown as Record<string, unknown>
+      const originalExecute = toolAsAny.execute as (input: Record<string, unknown>) => Promise<Record<string, unknown>>
+      toolAsAny.execute = async (input: Record<string, unknown>) => {
         const approvalId = `approval-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 
         // Build a readable summary of the tool call

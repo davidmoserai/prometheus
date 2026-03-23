@@ -7,7 +7,7 @@
 - **UI framework**: Tailwind CSS v4 with `@theme` tokens in `globals.css`
 - **State management**: Zustand (`src/renderer/src/stores/app-store.ts`)
 - **Component library**: Custom components in `src/renderer/src/components/ui/`
-- **Data persistence**: JSON file at `~/Library/Application Support/prometheus/prometheus-data/store.json`
+- **Data persistence**: JSON file at `~/Library/Application Support/prometheus/prometheus-data/store.json` + LibSQL at `mastra-memory.db` (Mastra memory)
 
 ## Important: Tailwind CSS v4 Spacing Bug
 Tailwind spacing utilities (`p-7`, `mb-5`, `gap-6`, etc.) do NOT render at correct sizes in this project. **Always use inline `style={{ }}` for spacing** (padding, margin, gap). Keep Tailwind for colors, borders, typography, flex/grid, transitions, rounded corners.
@@ -44,7 +44,7 @@ Tailwind spacing utilities (`p-7`, `mb-5`, `gap-6`, etc.) do NOT render at corre
 
 ## Tool System (Mastra + Zod Definitions)
 - Tools built dynamically per request in `buildMastraTools()` using Mastra `createTool` + Zod schemas
-- **Memory tools** (always available): `save_memory`, `create_knowledge_doc`, `update_knowledge_doc`
+- **Memory tools**: `update_working_memory` (auto-provided by Mastra), `search_memory` (when embeddings available), `create_knowledge_doc`, `update_knowledge_doc`
 - **Builtin tools** (per employee config): `web_search`, `web_browse`, `read_file`, `write_file`, `execute_code`
 - **MCP tools**: External tools from connected MCP servers via `@mastra/mcp` package
 - **Delegation**: `delegate_task`, `message_employee` (when employee has contactable employees)
@@ -66,15 +66,39 @@ Tailwind spacing utilities (`p-7`, `mb-5`, `gap-6`, etc.) do NOT render at corre
 - **Lifecycle**: MCPManager connects to all enabled servers on app start, disconnects on app quit
 - **Mock API**: `mcp` namespace with stubs for web preview mode
 
-## Agent Memory System
-- `Employee.memory: string` — persistent memory field, survives across conversations
-- Agents use `save_memory` tool to save important facts/decisions/preferences
-- Memory injected into system prompt under "# Your Memory" section
-- Employee editor shows memory (read-only) with "Clear Memory" button
-- Agents can create/update knowledge docs via `create_knowledge_doc` / `update_knowledge_doc` tools
-- Knowledge doc IDs shown in system prompt so agents can reference them
-- `KnowledgeDocument` has `docType` ('living' | 'reference') — no verification/review system (removed for simplicity)
-- Agents are instructed to auto-update knowledge docs when they learn contradicting information
+## Agent Memory System (Mastra Memory)
+- **Package**: `@mastra/memory` + `@mastra/libsql` — persistent memory with LibSQL storage
+- **Singleton**: `src/main/memory.ts` — `initMemory(providers)` creates shared Memory instance, re-inits on settings save
+- **Storage**: LibSQL database at `{userData}/prometheus-data/mastra-memory.db`
+- **Embedding model**: Auto-detected from configured providers (OpenAI > Vercel > Google > Mistral), no separate config needed
+
+### What the Agent Sees (per request)
+1. **System prompt** — employee name/role, custom prompt, knowledge docs, team info (built by `buildSystemPrompt()`)
+2. **Working memory** — auto-injected by Mastra into the system prompt; structured notepad per employee, persists across all conversations
+3. **Message history** — last 20 messages from LibSQL, auto-retrieved by Mastra via `threadId`; only the latest user message is passed from our code (Mastra merges stored history)
+4. **Tools** — `update_working_memory` (auto-provided by Mastra), `search_memory` (if embeddings configured), plus builtin/MCP/delegation tools
+
+### Memory Tools
+- **`update_working_memory`** — Auto-provided by Mastra when memory is attached to Agent. Agents use this to persist facts, decisions, preferences. Resource-scoped (one working memory per employee, shared across all their conversations)
+- **`search_memory`** — Custom tool in `buildMastraTools()`. Semantic vector search over all past conversations for that employee via `memory.recall()` with `scope: 'resource'`. Only available when an embedding-capable provider is configured
+- **Legacy `save_memory`** — Falls back to simple string replacement on `employee.memory` when Mastra memory is unavailable
+
+### Message Flow
+- `sendMessage()` only passes the latest user message to `agent.stream()` when memory is active (Mastra retrieves history from LibSQL)
+- Without memory, full conversation history from JSON store is passed as before
+- Mastra auto-persists both user and assistant messages to LibSQL via `threadId`/`resourceId`
+- JSON store (`store.addMessage()`) still used for UI conversation display — dual storage by design
+- Task conversations are ephemeral (no `threadId` passed) — stored only in `task.messages`, not in Mastra memory
+
+### Migration & Lifecycle
+- On app start: `initMemory(providers)` + one-time migration of legacy `employee.memory` → Mastra working memory
+- On company switch: lazy migration for employees in newly active company
+- On settings save: memory re-initialized (picks up new/rotated API keys)
+
+### IPC & UI
+- `memory:getWorkingMemory`, `memory:clearWorkingMemory` — used by employee editor
+- Employee editor shows working memory as **read-only** textarea with "Clear Memory" button
+- Knowledge docs (`create_knowledge_doc` / `update_knowledge_doc`) still separate (stored in JSON store, not Mastra)
 
 ## File Upload in Chat
 - `ChatAttachment` type: `{ id, filename, path, mimetype, size }`
@@ -111,6 +135,7 @@ Tailwind spacing utilities (`p-7`, `mb-5`, `gap-6`, etc.) do NOT render at corre
 - `src/main/store.ts` — EmployeeStore class, JSON persistence, company-scoped data
 - `src/main/types.ts` — All type definitions (Company, Employee, Task, etc.) + DEFAULT_PROVIDERS
 - `src/main/agent-manager.ts` — LLM agent manager (unified Zod tool defs; memory/knowledge tools; MCP tool merging; OpenAI-compatible, Anthropic, Ollama routing; streaming; prompt caching; token counting; compression)
+- `src/main/memory.ts` — Mastra Memory singleton (LibSQL storage, auto-detected embeddings, working memory + semantic search)
 - `src/main/mcp-manager.ts` — MCP server connection manager (connect, disconnect, tool discovery)
 - `src/main/scheduler.ts` — Recurring task scheduler (60s interval check)
 - `src/preload/index.ts` — Secure IPC bridge
