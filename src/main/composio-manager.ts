@@ -73,10 +73,7 @@ export class ComposioManager {
    * Returns map of appId -> connected boolean.
    */
   async listConnectedApps(): Promise<Record<string, boolean>> {
-    const result = await this.composio.connectedAccounts.list({
-      userIds: [this.userId],
-      statuses: ['ACTIVE']
-    })
+    const result = await this.composio.connectedAccounts.list({ statuses: ['ACTIVE'] })
     const connected: Record<string, boolean> = {}
     for (const account of result.items) {
       connected[account.toolkit.slug] = true
@@ -88,10 +85,7 @@ export class ComposioManager {
    * List only the apps the user has actively connected, with name and logo.
    */
   async listActiveIntegrations(): Promise<IntegrationDefinition[]> {
-    const result = await this.composio.connectedAccounts.list({
-      userIds: [this.userId],
-      statuses: ['ACTIVE']
-    })
+    const result = await this.composio.connectedAccounts.list({ statuses: ['ACTIVE'] })
 
     if (result.items.length === 0) return []
 
@@ -142,10 +136,7 @@ export class ComposioManager {
   }
 
   async disconnectApp(appId: string): Promise<void> {
-    const result = await this.composio.connectedAccounts.list({
-      userIds: [this.userId],
-      toolkitSlugs: [appId]
-    })
+    const result = await this.composio.connectedAccounts.list({ toolkitSlugs: [appId] })
     const account = result.items[0]
     if (!account) return
     await this.composio.connectedAccounts.delete(account.id)
