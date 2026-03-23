@@ -443,6 +443,7 @@ export function installMockApi() {
         conv.updatedAt = now()
         return conv
       },
+      stop: async (_conversationId: string) => {},
       onStream: () => () => {},
       onFileWritten: () => () => {},
       onToolCall: () => () => {},

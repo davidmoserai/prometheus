@@ -57,6 +57,8 @@ const api = {
   chat: {
     send: (conversationId: string, message: string) =>
       ipcRenderer.invoke('chat:send', conversationId, message),
+    stop: (conversationId: string) =>
+      ipcRenderer.invoke('chat:stop', conversationId),
     countTokens: (conversationId: string) =>
       ipcRenderer.invoke('chat:countTokens', conversationId),
     compress: (conversationId: string) =>

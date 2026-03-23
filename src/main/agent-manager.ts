@@ -449,6 +449,8 @@ export class AgentManager {
   private onToolCall?: (data: { conversationId: string; tool: string; summary: string; detail?: string }) => void
   private onApprovalRequest?: (data: { conversationId: string; approvalId: string; tool: string; args: Record<string, unknown>; summary: string }) => void
   private pendingApprovals: Map<string, { resolve: (approved: boolean) => void; timer: ReturnType<typeof setTimeout> }> = new Map()
+  private activeAbortControllers: Map<string, AbortController> = new Map()
+  private activeClaudeCodeAborts: Map<string, () => void> = new Map()
 
   constructor(store: EmployeeStore, mcpManager?: MCPManager, convService?: ConversationService) {
     this.store = store
@@ -504,6 +506,27 @@ export class AgentManager {
       pending.resolve(false)
     }
     this.pendingApprovals.clear()
+  }
+
+  /** Abort the active stream for a conversation */
+  abortStream(conversationId: string) {
+    const controller = this.activeAbortControllers.get(conversationId)
+    if (controller) {
+      controller.abort()
+      this.activeAbortControllers.delete(conversationId)
+    }
+    const ccAbort = this.activeClaudeCodeAborts.get(conversationId)
+    if (ccAbort) {
+      ccAbort()
+      this.activeClaudeCodeAborts.delete(conversationId)
+    }
+  }
+
+  /** Abort all active streams (used on app quit) */
+  abortAllStreams() {
+    for (const conversationId of this.activeAbortControllers.keys()) {
+      this.abortStream(conversationId)
+    }
   }
 
   async sendMessage(
@@ -576,6 +599,14 @@ export class AgentManager {
       this.wrapToolsWithApproval(allTools, employee, conversationId)
     }
 
+    const abortController = new AbortController()
+    this.activeAbortControllers.set(conversationId, abortController)
+    let streamedText = ''
+    const wrappedOnStream = (chunk: string) => {
+      streamedText += chunk
+      onStream(chunk)
+    }
+
     try {
       let responseText: string
 
@@ -589,7 +620,7 @@ export class AgentManager {
           employee,
           systemPrompt,
           fullMessages,
-          onStream,
+          wrappedOnStream,
           conversationId,
           toolCallCb ? (data) => toolCallCb(data) : undefined,
           conversationId ? (data) => this.onFileWritten?.({ conversationId, ...data }) : undefined,
@@ -601,9 +632,10 @@ export class AgentManager {
           employee,
           systemPrompt,
           messages,
-          onStream,
+          wrappedOnStream,
           Object.keys(allTools).length > 0 ? allTools : undefined,
-          mem
+          mem,
+          abortController.signal
         )
       }
 
@@ -611,11 +643,20 @@ export class AgentManager {
       onMessageStored?.(msg)
       return msg
     } catch (error) {
+      if (abortController.signal.aborted) {
+        const content = streamedText.trim() || '[Stopped]'
+        const msg = await this.addMessage(conversationId, { role: 'assistant', content })
+        onMessageStored?.(msg)
+        return msg
+      }
       const errorMsg = `Failed to get response: ${error instanceof Error ? error.message : 'Unknown error'}. Check your API key and model settings.`
       const msg = await this.addMessage(conversationId, { role: 'assistant', content: errorMsg })
       onStream(errorMsg)
       onMessageStored?.(msg)
       return msg
+    } finally {
+      this.activeAbortControllers.delete(conversationId)
+      this.activeClaudeCodeAborts.delete(conversationId)
     }
   }
 
@@ -630,7 +671,8 @@ export class AgentManager {
     messages: { role: 'user' | 'assistant' | 'system'; content: string }[],
     onStream: (chunk: string) => void,
     tools?: Record<string, ReturnType<typeof createTool>>,
-    mem?: Memory
+    mem?: Memory,
+    abortSignal?: AbortSignal
   ): Promise<string> {
     const modelRef = buildModelRef(provider, employee.model)
     const hasTools = !!tools && Object.keys(tools).length > 0
@@ -655,11 +697,13 @@ export class AgentManager {
       // (threadId triggers Mastra auto-persistence — we handle that via ConversationService)
       resourceId: employee.id
     }
+    if (abortSignal) streamOptions.abortSignal = abortSignal
     if (providerOptions) streamOptions.providerOptions = providerOptions
     const result = await streamFn(messages, streamOptions)
 
     let accumulated = ''
     for await (const chunk of result.textStream) {
+      if (abortSignal?.aborted) break
       accumulated += chunk
       onStream(chunk)
     }
@@ -782,7 +826,7 @@ export class AgentManager {
           }
         : onToolCall
 
-      const { promise } = runClaudeCode({
+      const { promise, abort } = runClaudeCode({
         prompt,
         systemPrompt,
         model: employee.model,
@@ -799,6 +843,7 @@ export class AgentManager {
         onToolCall: filteredOnToolCall,
         onFileWritten
       })
+      if (conversationId) this.activeClaudeCodeAborts.set(conversationId, abort)
       return await promise
     } finally {
       approvalServer?.close()

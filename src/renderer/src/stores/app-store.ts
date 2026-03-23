@@ -269,6 +269,7 @@ interface AppState {
   createConversation: (employeeId: string) => Promise<Conversation>
   deleteConversation: (conversationId: string) => Promise<void>
   sendMessage: (conversationId: string, message: string) => Promise<void>
+  stopMessage: (conversationId: string) => void
   uploadFile: (conversationId: string, filePath: string) => Promise<ChatAttachment>
 
   // Actions — Tasks
@@ -576,7 +577,12 @@ export const useAppStore = create<AppState>((set, get) => ({
         next.delete(conversationId)
         return { sendingConversationIds: next }
       })
+      get().clearStreamingParts(conversationId)
     }
+  },
+
+  stopMessage: (conversationId) => {
+    window.api?.chat?.stop(conversationId)
   },
 
   uploadFile: async (conversationId, filePath) => {

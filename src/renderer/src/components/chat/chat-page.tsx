@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Send, Plus, MessageSquare, ChevronLeft, ChevronDown, Users, ArrowRight, Trash2, Minimize2, FileText, Download, Paperclip, X, Brain, Terminal, Search, Globe, Edit3, Code, ShieldAlert, Check, XIcon } from 'lucide-react'
+import { Send, Square, Plus, MessageSquare, ChevronLeft, ChevronDown, Users, ArrowRight, Trash2, Minimize2, FileText, Download, Paperclip, X, Brain, Terminal, Search, Globe, Edit3, Code, ShieldAlert, Check, XIcon } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Button } from '@/components/ui/button'
@@ -33,6 +33,7 @@ export function ChatPage() {
     createConversation,
     deleteConversation,
     sendMessage,
+    stopMessage,
     setActiveView,
     setCreatingEmployee,
     getTokenCount,
@@ -191,6 +192,11 @@ export function ChatPage() {
       e.preventDefault()
       handleSend()
     }
+  }
+
+  const handleStop = () => {
+    if (!selectedConversationId) return
+    stopMessage(selectedConversationId)
   }
 
   const removeStagedAttachment = (id: string) => {
@@ -647,14 +653,24 @@ export function ChatPage() {
                     style={{ minHeight: '48px', maxHeight: '120px', padding: '14px 48px 14px 20px' }}
                   />
                 </div>
-                <Button
-                  size="icon"
-                  onClick={handleSend}
-                  disabled={(!input.trim() && stagedAttachments.length === 0) || isSending}
-                  className="shrink-0 h-[48px] w-[48px] rounded-2xl"
-                >
-                  <Send className="w-4 h-4" />
-                </Button>
+                {isSending ? (
+                  <button
+                    onClick={handleStop}
+                    className="shrink-0 h-[48px] w-[48px] rounded-2xl flex items-center justify-center bg-bg-elevated border border-border-default hover:border-flame-500/50 hover:bg-flame-500/10 transition-all cursor-pointer"
+                    title="Stop generating"
+                  >
+                    <Square className="w-4 h-4 text-flame-400 fill-flame-400" />
+                  </button>
+                ) : (
+                  <Button
+                    size="icon"
+                    onClick={handleSend}
+                    disabled={!input.trim() && stagedAttachments.length === 0}
+                    className="shrink-0 h-[48px] w-[48px] rounded-2xl"
+                  >
+                    <Send className="w-4 h-4" />
+                  </Button>
+                )}
               </div>
             </div>
           </>
