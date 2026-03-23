@@ -1,8 +1,8 @@
 import { MCPClient } from '@mastra/mcp'
 import { shell } from 'electron'
+import { execSync } from 'child_process'
 import type { Tool } from '@mastra/core/tools'
 import type { MCPServerConfig } from './types'
-import type { Readable } from 'stream'
 
 // Build env with proper PATH for MCP subprocesses (Electron strips user paths)
 function mcpEnv(extra?: Record<string, string>): Record<string, string> {
@@ -19,24 +19,42 @@ function mcpEnv(extra?: Record<string, string>): Record<string, string> {
     '/opt/homebrew/bin'
   ]
   env.PATH = [...extraPaths, env.PATH || ''].join(':')
-  // Ensure MCP servers can open browsers for OAuth flows
-  if (!env.BROWSER) env.BROWSER = '/usr/bin/open'
+
+  // Resolve full path to npx/node so MCP servers can find them
+  try {
+    const npxPath = execSync('which npx', { encoding: 'utf-8', env, timeout: 3000, stdio: 'pipe' }).trim()
+    if (npxPath) {
+      const binDir = npxPath.replace(/\/npx$/, '')
+      if (!env.PATH.includes(binDir)) env.PATH = `${binDir}:${env.PATH}`
+    }
+  } catch {}
+
+  // Set BROWSER so MCP servers that use the `open` npm package can open the system browser
+  // Use the full path to macOS `open` command
+  env.BROWSER = '/usr/bin/open'
+
   if (extra) Object.assign(env, extra)
   return env
 }
 
-// Watch a stderr stream for URLs and open them in the system browser
-function watchStderrForUrls(stderr: Readable | null, serverId: string): void {
-  if (!stderr) return
-  stderr.on('data', (chunk: Buffer) => {
-    const text = chunk.toString()
-    // Look for URLs that look like OAuth/auth redirects
-    const urlMatch = text.match(/https?:\/\/[^\s"'<>]+/)
-    if (urlMatch) {
-      console.log(`MCP server "${serverId}" requested browser auth: ${urlMatch[0]}`)
-      shell.openExternal(urlMatch[0])
-    }
-  })
+// Watch stderr for URLs and open them in the system browser
+function watchStderrForUrls(client: MCPClient, serverId: string): void {
+  try {
+    const stderr = client.getServerStderr(serverId)
+    if (!stderr) return
+    stderr.on('data', (chunk: Buffer) => {
+      const text = chunk.toString()
+      console.log(`[MCP:${serverId}] ${text.trim()}`)
+      // Look for URLs that look like OAuth/auth redirects
+      const urlMatch = text.match(/https?:\/\/[^\s"'<>)]+/)
+      if (urlMatch) {
+        console.log(`MCP server "${serverId}" requested browser auth: ${urlMatch[0]}`)
+        shell.openExternal(urlMatch[0])
+      }
+    })
+  } catch {
+    // getServerStderr may not be available
+  }
 }
 
 // ============================================================
@@ -71,11 +89,10 @@ export class MCPManager {
     this.clients.set(config.id, client)
 
     // Watch stderr for OAuth URLs and open them in the system browser
-    const stderr = (client as unknown as { stderr: Readable | null }).stderr
-    watchStderrForUrls(stderr, config.id)
+    watchStderrForUrls(client, config.id)
 
-    // Discover tools with a timeout so the UI doesn't hang
-    const timeoutMs = 60000
+    // Discover tools with a timeout (longer for servers that need auth + gateway startup)
+    const timeoutMs = 90000
     const toolsetPromise = client.listToolsets()
     const timeoutPromise = new Promise<never>((_, reject) =>
       setTimeout(() => reject(new Error(`Connection timed out after ${timeoutMs / 1000}s — the server may need browser auth. Try running it manually first: ${config.command} ${config.args.join(' ')}`)), timeoutMs)
