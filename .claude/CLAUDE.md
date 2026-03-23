@@ -75,7 +75,7 @@ Tailwind spacing utilities (`p-7`, `mb-5`, `gap-6`, etc.) do NOT render at corre
 ### What the Agent Sees (per request)
 1. **System prompt** — employee name/role, custom prompt, knowledge docs, team info (built by `buildSystemPrompt()`)
 2. **Working memory** — auto-injected by Mastra into the system prompt; structured notepad per employee, persists across all conversations
-3. **Message history** — last 20 messages from LibSQL, auto-retrieved by Mastra via `threadId`; only the latest user message is passed from our code (Mastra merges stored history)
+3. **Current conversation** — messages stored in Mastra LibSQL, retrieved via `ConversationService.getConversation()`
 4. **Tools** — `update_working_memory` (auto-provided by Mastra), `search_memory` (if embeddings configured), plus builtin/MCP/delegation tools
 
 ### Memory Tools
@@ -83,15 +83,15 @@ Tailwind spacing utilities (`p-7`, `mb-5`, `gap-6`, etc.) do NOT render at corre
 - **`search_memory`** — Custom tool in `buildMastraTools()`. Semantic vector search over all past conversations for that employee via `memory.recall()` with `scope: 'resource'`. Only available when an embedding-capable provider is configured
 - **Legacy `save_memory`** — Falls back to simple string replacement on `employee.memory` when Mastra memory is unavailable
 
-### Message Flow
-- `sendMessage()` only passes the latest user message to `agent.stream()` when memory is active (Mastra retrieves history from LibSQL)
-- Without memory, full conversation history from JSON store is passed as before
-- Mastra auto-persists both user and assistant messages to LibSQL via `threadId`/`resourceId`
-- JSON store (`store.addMessage()`) still used for UI conversation display — dual storage by design
-- Task conversations are ephemeral (no `threadId` passed) — stored only in `task.messages`, not in Mastra memory
+### Conversations (Single Source of Truth)
+- **ConversationService** (`src/main/conversation-service.ts`) wraps Mastra thread/message APIs, returns `Conversation`/`ChatMessage` types
+- Messages persisted via `ConversationService.addMessage()` — NOT via Mastra auto-persistence (no `threadId` passed to `agent.stream()`)
+- `agent.stream()` receives `resourceId` only (for working memory injection)
+- Task conversations are ephemeral — stored in `task.messages` (JSON store), not Mastra memory
+- File attachments stay on filesystem at `{userData}/prometheus-data/files/{conversationId}/`
 
-### Migration & Lifecycle
-- On app start: `initMemory(providers)` + one-time migration of legacy `employee.memory` → Mastra working memory
+### Lifecycle
+- On app start: `initMemory(providers)` + legacy `employee.memory` → Mastra working memory migration
 - On company switch: lazy migration for employees in newly active company
 - On settings save: memory re-initialized (picks up new/rotated API keys)
 
@@ -104,7 +104,7 @@ Tailwind spacing utilities (`p-7`, `mb-5`, `gap-6`, etc.) do NOT render at corre
 - `ChatAttachment` type: `{ id, filename, path, mimetype, size }`
 - `ChatMessage.attachments?: ChatAttachment[]` — optional attachments on messages
 - `store.uploadFile(conversationId, sourcePath)` — copies file to `{userData}/prometheus-data/files/{conversationId}/`
-- `store.deleteConversation()` cleans up conversation files directory via `rmSync`
+- `ConversationService.deleteConversation()` cleans up conversation files directory via `rmSync`
 - IPC: `files:pick` (opens native file dialog), `files:upload` (copies and returns metadata)
 - Chat UI: Paperclip button to pick files, drag-and-drop on input area, image preview thumbnails for staged attachments
 - Image attachments rendered inline in message bubbles
@@ -136,6 +136,7 @@ Tailwind spacing utilities (`p-7`, `mb-5`, `gap-6`, etc.) do NOT render at corre
 - `src/main/types.ts` — All type definitions (Company, Employee, Task, etc.) + DEFAULT_PROVIDERS
 - `src/main/agent-manager.ts` — LLM agent manager (unified Zod tool defs; memory/knowledge tools; MCP tool merging; OpenAI-compatible, Anthropic, Ollama routing; streaming; prompt caching; token counting; compression)
 - `src/main/memory.ts` — Mastra Memory singleton (LibSQL storage, auto-detected embeddings, working memory + semantic search)
+- `src/main/conversation-service.ts` — Wraps Mastra thread/message APIs, translates to Conversation/ChatMessage types
 - `src/main/mcp-manager.ts` — MCP server connection manager (connect, disconnect, tool discovery)
 - `src/main/scheduler.ts` — Recurring task scheduler (60s interval check)
 - `src/preload/index.ts` — Secure IPC bridge

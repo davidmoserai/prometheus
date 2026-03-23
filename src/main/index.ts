@@ -9,7 +9,6 @@ import { ConversationService } from './conversation-service'
 import type { MCPServerConfig } from './types'
 import { isClaudeCodeInstalled, getAuthStatus, launchLogin } from './claude-code-runner'
 import { initMemory, getMemory } from './memory'
-import { migrateConversationsToMastra } from './migration'
 
 let mainWindow: BrowserWindow | null = null
 let store: EmployeeStore
@@ -301,9 +300,6 @@ app.whenReady().then(async () => {
   const settings = store.getSettings()
   const memory = initMemory(settings.providers)
   convService = new ConversationService()
-
-  // Migrate conversations from JSON store → Mastra Memory (one-time)
-  await migrateConversationsToMastra(convService)
 
   // Migrate legacy employee.memory strings → Mastra working memory (one-time)
   for (const emp of store.listEmployees()) {
