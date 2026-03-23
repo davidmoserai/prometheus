@@ -142,11 +142,13 @@ export class MCPManager {
             url: new URL(config.url),
             // Inject auth headers via custom fetch for both Streamable HTTP and SSE transports
             fetch: async (url, init) => {
+              const existing = init?.headers as Record<string, string> ?? {}
               return globalThis.fetch(url as string, {
                 ...init,
                 headers: {
+                  'Content-Type': 'application/json',
                   'Accept': 'application/json, text/event-stream',
-                  ...(init?.headers as Record<string, string> ?? {}),
+                  ...existing,
                   ...extraHeaders
                 }
               })
