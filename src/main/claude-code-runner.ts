@@ -208,9 +208,9 @@ export function runClaudeCode(options: RunOptions): { promise: Promise<string>; 
     const args: string[] = [
       '-p', // print mode (non-interactive)
       '--output-format', 'stream-json',
+      '--verbose', // required for stream-json
       '--system-prompt', systemPrompt,
       '--model', model,
-      '--bare', // skip auto-discovery for faster startup
       '--no-session-persistence',
       '--dangerously-skip-permissions'
     ]
@@ -275,31 +275,37 @@ export function runClaudeCode(options: RunOptions): { promise: Promise<string>; 
       }
     })
 
-    function handleStreamMessage(msg: ClaudeStreamMessage) {
-      // Handle text content from assistant messages
-      if (msg.type === 'assistant' && msg.content) {
-        accumulated = msg.content
-        onStream(accumulated)
-      }
+    function handleStreamMessage(msg: Record<string, unknown>) {
+      const type = msg.type as string
 
-      // Handle content block deltas (partial streaming)
-      if (msg.content_block_delta?.text) {
-        accumulated += msg.content_block_delta.text
-        onStream(accumulated)
-      }
+      // Handle assistant messages — extract text from content blocks
+      if (type === 'assistant' && msg.message) {
+        const message = msg.message as Record<string, unknown>
+        const content = message.content as { type: string; text?: string }[] | undefined
+        if (content) {
+          const textParts = content.filter(c => c.type === 'text' && c.text).map(c => c.text)
+          if (textParts.length > 0) {
+            accumulated = textParts.join('')
+            onStream(accumulated)
+          }
 
-      // Handle tool calls
-      if (msg.tool_name && onToolCall) {
-        const inputStr = msg.tool_input ? JSON.stringify(msg.tool_input).slice(0, 100) : ''
-        onToolCall({ tool: msg.tool_name, summary: `${msg.tool_name}: ${inputStr}` })
+          // Detect tool use blocks
+          if (onToolCall) {
+            for (const block of content) {
+              if (block.type === 'tool_use') {
+                const toolBlock = block as unknown as { name?: string; input?: Record<string, unknown> }
+                const inputStr = toolBlock.input ? JSON.stringify(toolBlock.input).slice(0, 100) : ''
+                onToolCall({ tool: toolBlock.name || 'unknown', summary: `${toolBlock.name}: ${inputStr}` })
+              }
+            }
+          }
+        }
       }
 
       // Handle final result
-      if (msg.type === 'result') {
-        if (msg.result) {
-          accumulated = msg.result
-          onStream(accumulated)
-        }
+      if (type === 'result' && msg.result) {
+        accumulated = msg.result as string
+        onStream(accumulated)
       }
     }
 
