@@ -16,7 +16,8 @@ import {
   AppSettings,
   DEFAULT_SETTINGS,
   DEFAULT_PROVIDERS,
-  DEFAULT_MCP_SERVERS
+  DEFAULT_MCP_SERVERS,
+  LEGACY_TOOL_ID_MAP
 } from './types'
 
 interface CompanyData {
@@ -81,12 +82,21 @@ export class EmployeeStore {
 
         // Already new format
         if (raw.companies && raw.companyData) {
-          // Ensure all employees have the memory field (added in memory system migration)
+          // Migrations for existing data
           for (const companyId of Object.keys(raw.companyData)) {
             const data = raw.companyData[companyId]
             if (data?.employees) {
               for (const emp of data.employees) {
+                // Ensure memory field exists
                 if (emp.memory === undefined) emp.memory = ''
+                // Migrate legacy tool IDs to match Mastra keys
+                if (emp.tools) {
+                  for (const tool of emp.tools) {
+                    if (LEGACY_TOOL_ID_MAP[tool.id]) {
+                      tool.id = LEGACY_TOOL_ID_MAP[tool.id]
+                    }
+                  }
+                }
               }
             }
           }

@@ -1,4 +1,5 @@
 import { spawn, execSync, ChildProcess } from 'child_process'
+import { TOOL_IDS } from './types'
 import { writeFileSync, unlinkSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
@@ -136,11 +137,11 @@ export function launchLogin(): Promise<ClaudeAuthStatus> {
 // ============================================================
 
 const TOOL_MAP: Record<string, string[]> = {
-  'web-search': ['WebSearch'],
-  'web-browse': ['WebFetch'],
-  'file-read': ['Read', 'Glob', 'Grep'],
-  'file-write': ['Write', 'Edit'],
-  'code-execute': ['Bash']
+  [TOOL_IDS.WEB_SEARCH]: ['WebSearch'],
+  [TOOL_IDS.WEB_BROWSE]: ['WebFetch'],
+  [TOOL_IDS.READ_FILE]: ['Read', 'Glob', 'Grep'],
+  [TOOL_IDS.WRITE_FILE]: ['Write', 'Edit'],
+  [TOOL_IDS.EXECUTE_CODE]: ['Bash']
 }
 
 /**

@@ -12,11 +12,11 @@ import { useAppStore, type Employee, type ToolAssignment, type PermissionSet, ty
 const AVATARS = ['🔥', '⚡', '🧠', '🎯', '🚀', '💡', '🔮', '⭐', '🛡️', '🎨', '📊', '🔬', '📝', '🤖', '🦾', '🧬']
 
 const DEFAULT_TOOLS: ToolAssignment[] = [
-  { id: 'web-search', name: 'Web Search', source: 'builtin', enabled: false, requiresApproval: false },
-  { id: 'web-browse', name: 'Web Browse', source: 'builtin', enabled: false, requiresApproval: false },
-  { id: 'file-read', name: 'Read Files', source: 'builtin', enabled: false, requiresApproval: false },
-  { id: 'file-write', name: 'Write Files', source: 'builtin', enabled: false, requiresApproval: true },
-  { id: 'code-execute', name: 'Execute Code', source: 'builtin', enabled: false, requiresApproval: true }
+  { id: 'web_search', name: 'Web Search', source: 'builtin', enabled: false, requiresApproval: false },
+  { id: 'web_browse', name: 'Web Browse', source: 'builtin', enabled: false, requiresApproval: false },
+  { id: 'read_file', name: 'Read Files', source: 'builtin', enabled: false, requiresApproval: false },
+  { id: 'write_file', name: 'Write Files', source: 'builtin', enabled: false, requiresApproval: true },
+  { id: 'execute_code', name: 'Execute Code', source: 'builtin', enabled: false, requiresApproval: true }
 ]
 
 const DEFAULT_CONTACT_ACCESS: ContactAccess = {
@@ -51,7 +51,7 @@ const TEMPLATES: EmployeeTemplate[] = [
     label: 'Researcher',
     role: 'Senior Research Analyst',
     systemPrompt: 'You are a thorough research analyst. When given a topic, provide comprehensive, well-sourced analysis. Structure findings clearly with key insights, supporting evidence, and actionable recommendations. Always verify claims and note uncertainty levels.',
-    enabledToolIds: ['web-search', 'web-browse']
+    enabledToolIds: ['web_search', 'web_browse']
   },
   {
     id: 'carousel-designer',
@@ -278,7 +278,7 @@ After user approves the preview, export each slide as **1080×1350px PNG**.
 7. **Consistent components** — same tag style, list style, spacing across all slides
 8. **Content padding clears UI** — body text never overlaps progress bar or arrow
 9. **Iterate fast** — show preview, get feedback on specific slides, fix those slides`,
-    enabledToolIds: ['web-search', 'file-write', 'code-execute']
+    enabledToolIds: ['web_search', 'write_file', 'execute_code']
   },
   {
     id: 'developer',
@@ -286,7 +286,7 @@ After user approves the preview, export each slide as **1080×1350px PNG**.
     label: 'Developer',
     role: 'Full-Stack Developer',
     systemPrompt: 'You are a senior software developer. Write clean, well-structured code following best practices. Explain your technical decisions. Always consider security, performance, and maintainability. Ask clarifying questions before implementing.',
-    enabledToolIds: ['file-read', 'file-write', 'code-execute']
+    enabledToolIds: ['read_file', 'write_file', 'execute_code']
   }
 ]
 
