@@ -4,7 +4,7 @@ import { join } from 'path'
 import { EmployeeStore } from './store'
 import { AgentManager } from './agent-manager'
 import { MCPManager } from './mcp-manager'
-import { ComposioManager, COMPOSIO_MCP_SERVER_ID } from './composio-manager'
+import { ComposioManager, COMPOSIO_MCP_SERVER_ID, setComposioMcpConfig } from './composio-manager'
 import { INTEGRATION_CATALOG } from './integration-catalog'
 import { Scheduler } from './scheduler'
 import { ConversationService } from './conversation-service'
@@ -424,10 +424,14 @@ async function doReconnectComposioMcp(): Promise<void> {
     // If no apps are connected, disconnect any existing Composio MCP session and stop
     if (connectedAppIds.length === 0) {
       await mcpManager.disconnect(COMPOSIO_MCP_SERVER_ID)
+      setComposioMcpConfig(null)
       return
     }
 
     const mcpConfig = await composioManager.getMcpConfig(connectedAppIds)
+
+    // Store HTTP config in memory for Claude Code agent to use
+    setComposioMcpConfig({ url: mcpConfig.url!, headers: mcpConfig.headers || {} })
 
     // Connect via MCPManager — do NOT persist to settings (config contains ephemeral session tokens)
     await mcpManager.connect(mcpConfig)

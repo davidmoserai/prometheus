@@ -5,6 +5,12 @@ import type { IntegrationDefinition } from './integration-catalog'
 
 export const COMPOSIO_MCP_SERVER_ID = 'composio-integrations'
 
+// In-memory Composio HTTP config (url + headers) — set by index.ts after connecting
+export let composioMcpConfig: { url: string; headers: Record<string, string> } | null = null
+export function setComposioMcpConfig(config: { url: string; headers: Record<string, string> } | null): void {
+  composioMcpConfig = config
+}
+
 // ============================================================
 // ComposioManager — manages Composio session and OAuth flows
 // ============================================================

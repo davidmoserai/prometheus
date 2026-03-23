@@ -163,23 +163,38 @@ function mapToolsForCLI(enabledToolIds: string[]): string[] {
 
 interface MCPConfigForCLI {
   mcpServers: Record<string, {
-    command: string
-    args: string[]
+    command?: string
+    args?: string[]
     env?: Record<string, string>
+    url?: string
+    headers?: Record<string, string>
   }>
+}
+
+export interface MCPServerForCLI {
+  id: string
+  command?: string
+  args?: string[]
+  env?: Record<string, string>
+  // HTTP transport
+  url?: string
+  headers?: Record<string, string>
 }
 
 /**
  * Write a temporary MCP config file for Claude Code CLI.
+ * Supports both stdio (command/args) and HTTP (url/headers) transports.
  * Returns the path to the temp file.
  */
-function writeTempMcpConfig(servers: { id: string; command: string; args: string[]; env?: Record<string, string> }[]): string {
+function writeTempMcpConfig(servers: MCPServerForCLI[]): string {
   const config: MCPConfigForCLI = { mcpServers: {} }
   for (const server of servers) {
-    config.mcpServers[server.id] = {
-      command: server.command,
-      args: server.args,
-      env: server.env
+    if (server.url) {
+      // HTTP transport
+      config.mcpServers[server.id] = { url: server.url, headers: server.headers }
+    } else if (server.command) {
+      // Stdio transport
+      config.mcpServers[server.id] = { command: server.command, args: server.args || [], env: server.env }
     }
   }
   const filePath = join(tmpdir(), `prometheus-mcp-${Date.now()}.json`)
@@ -196,7 +211,7 @@ export interface RunOptions {
   systemPrompt: string
   model: string
   enabledToolIds: string[]
-  mcpServers?: { id: string; command: string; args: string[]; env?: Record<string, string> }[]
+  mcpServers?: MCPServerForCLI[]
   mcpToolNames?: string[]
   conversationHistory?: { role: string; content: string }[]
   approvalServerPort?: number    // if set, inject PreToolUse hook into subprocess CWD

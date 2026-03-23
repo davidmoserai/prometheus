@@ -10,6 +10,7 @@ import { ChatMessage, Employee, ProviderConfig, Task, TaskMessage, TOOL_IDS } fr
 import type { MCPManager } from './mcp-manager'
 import type { ConversationService } from './conversation-service'
 import { runClaudeCode, TOOL_MAP } from './claude-code-runner'
+import { COMPOSIO_MCP_SERVER_ID, composioMcpConfig } from './composio-manager'
 import { startApprovalServer } from './claude-code-approval-server'
 // ⚠️  CLAUDE CODE ONLY: internal HTTP API bridging memory/knowledge tools to Claude Code's MCP server.
 // Mastra agents use native createTool() functions and never touch this import.
@@ -736,18 +737,22 @@ export class AgentManager {
       })
     }
 
-    // Get enabled MCP servers for this employee
+    // Get enabled MCP servers for this employee (both stdio and HTTP)
     const mcpAssignments = employee.tools.filter(t => t.source === 'mcp' && t.enabled && t.mcpServerId)
     const mcpServerIds = [...new Set(mcpAssignments.map(t => t.mcpServerId!))]
     const settings = this.store.getSettings()
-    const mcpServers = mcpServerIds
-      .map(id => settings.mcpServers.find(s => s.id === id))
-      .filter(Boolean)
-      .map(s => {
-        // Use resolved command to fix broken shebangs (e.g. npx packages without node shebang)
-        const resolved = this.mcpManager?.resolveCommand(s!) || { command: s!.command, args: s!.args }
-        return { id: s!.id, command: resolved.command, args: resolved.args, env: s!.env }
-      })
+    const mcpServers: { id: string; command?: string; args?: string[]; env?: Record<string, string>; url?: string; headers?: Record<string, string> }[] = []
+    for (const id of mcpServerIds) {
+      // Check settings for stdio servers
+      const fromSettings = settings.mcpServers.find(s => s.id === id)
+      if (fromSettings) {
+        const resolved = this.mcpManager?.resolveCommand(fromSettings) || { command: fromSettings.command, args: fromSettings.args }
+        mcpServers.push({ id: fromSettings.id, command: resolved.command, args: resolved.args, env: fromSettings.env })
+      } else if (id === COMPOSIO_MCP_SERVER_ID && composioMcpConfig) {
+        // Composio is ephemeral (not in settings) — use in-memory config
+        mcpServers.push({ id, url: composioMcpConfig.url, headers: composioMcpConfig.headers })
+      }
+    }
 
     // Collect MCP tool names in Claude Code format: mcp__serverId__toolName
     const mcpToolNames: string[] = []
