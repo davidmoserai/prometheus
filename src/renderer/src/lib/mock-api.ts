@@ -481,6 +481,10 @@ export function installMockApi() {
       authStatus: async () => ({ authenticated: false }),
       login: async () => ({ authenticated: false, error: 'Not available in web preview' })
     },
+    memory: {
+      getWorkingMemory: async (_employeeId: string) => null,
+      clearWorkingMemory: async (_employeeId: string) => {}
+    },
     mcp: {
       list: async () => (settings as Record<string, unknown>).mcpServers || [],
       add: async (_config: unknown) => ({ success: true, tools: ['mock_tool_1', 'mock_tool_2'] }),

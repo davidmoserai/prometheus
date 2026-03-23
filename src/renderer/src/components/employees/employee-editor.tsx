@@ -336,6 +336,19 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
   const [creatingDept, setCreatingDept] = useState(false)
   const [newDeptName, setNewDeptName] = useState('')
   const [memoryText, setMemoryText] = useState(employee?.memory || '')
+  const [loadingMemory, setLoadingMemory] = useState(false)
+
+  // Load working memory from Mastra when editing
+  useEffect(() => {
+    if (!isEditing || !employee) return
+    setLoadingMemory(true)
+    window.api.memory?.getWorkingMemory(employee.id)
+      .then((wm: string | null) => {
+        if (wm !== null) setMemoryText(wm)
+      })
+      .catch(() => { /* fallback to employee.memory already in state */ })
+      .finally(() => setLoadingMemory(false))
+  }, [isEditing, employee?.id])
   const [activeTab, setActiveTab] = useState<'basic' | 'tools' | 'knowledge' | 'permissions'>('basic')
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({})
 
@@ -702,52 +715,41 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
                 </CardContent>
               </Card>
 
-              {/* Memory (editable, only shown when editing) */}
+              {/* Working Memory (read-only, only shown when editing) */}
               {isEditing && (
                 <Card>
                   <CardHeader>
                     <CardTitle className="flex items-center" style={{ gap: '8px' }}>
                       <Brain className="w-4 h-4 text-flame-400 drop-shadow-[0_0_6px_rgba(249,115,22,0.4)]" />
-                      Persistent Memory
+                      Working Memory
                     </CardTitle>
                     <CardDescription>
-                      Long-term memory that persists across conversations. Agents update this automatically, but you can edit it too.
+                      The agent's persistent memory across conversations. Updated automatically by the agent using the <code className="text-[11px] bg-bg-tertiary rounded px-1">update_working_memory</code> tool. Use <code className="text-[11px] bg-bg-tertiary rounded px-1">search_memory</code> to search past conversations.
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
                     <div className="flex flex-col" style={{ gap: '12px' }}>
                       <Textarea
-                        value={memoryText}
-                        onChange={(e) => setMemoryText(e.target.value)}
+                        value={loadingMemory ? 'Loading...' : memoryText}
+                        readOnly
                         rows={6}
-                        placeholder="No memories yet. The agent will save important facts here during conversations, or you can add context manually."
-                        className="font-mono text-[13px]"
+                        disabled={loadingMemory}
+                        placeholder="No working memory yet. The agent will populate this during conversations."
+                        className="font-mono text-[13px] opacity-80"
                       />
-                      <div className="flex justify-between">
-                        {memoryText !== (employee?.memory || '') && (
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={async () => {
-                              await updateEmployee(employee!.id, { memory: memoryText })
-                            }}
-                          >
-                            <Save className="w-3.5 h-3.5" />
-                            Save Memory
-                          </Button>
-                        )}
+                      <div className="flex justify-end">
                         {memoryText && (
                           <Button
                             variant="ghost"
                             size="sm"
                             onClick={async () => {
-                              await updateEmployee(employee!.id, { memory: '' })
+                              await window.api.memory?.clearWorkingMemory(employee!.id)
                               setMemoryText('')
                             }}
-                            className="text-red-400 hover:text-red-300 hover:bg-red-500/10 ml-auto"
+                            className="text-red-400 hover:text-red-300 hover:bg-red-500/10"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
-                            Clear
+                            Clear Memory
                           </Button>
                         )}
                       </div>

@@ -1,5 +1,6 @@
 import { EmployeeStore } from './store'
 import { AgentManager } from './agent-manager'
+import type { ConversationService } from './conversation-service'
 import { RecurringTask } from './types'
 
 /**
@@ -9,11 +10,13 @@ export class Scheduler {
   private intervalId: NodeJS.Timeout | null = null
   private store: EmployeeStore
   private agentManager: AgentManager
+  private convService?: ConversationService
   private onTaskRun?: (task: RecurringTask) => void
 
-  constructor(store: EmployeeStore, agentManager: AgentManager) {
+  constructor(store: EmployeeStore, agentManager: AgentManager, convService?: ConversationService) {
     this.store = store
     this.agentManager = agentManager
+    this.convService = convService
   }
 
   /** Set callback for notifying frontend when a recurring task runs */
@@ -68,7 +71,9 @@ export class Scheduler {
       })
 
       // Create a conversation for the task execution
-      const conv = this.store.createConversation(task.employeeId)
+      if (!this.convService) throw new Error('ConversationService not initialized')
+      const companyId = this.store.getActiveCompanyId() || ''
+      const conv = await this.convService.createConversation(task.employeeId, companyId)
 
       // Send the brief as a message
       await this.agentManager.sendMessage(

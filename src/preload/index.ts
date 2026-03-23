@@ -117,6 +117,10 @@ const api = {
     authStatus: () => ipcRenderer.invoke('claude-code:authStatus'),
     login: () => ipcRenderer.invoke('claude-code:login')
   },
+  memory: {
+    getWorkingMemory: (employeeId: string) => ipcRenderer.invoke('memory:getWorkingMemory', employeeId),
+    clearWorkingMemory: (employeeId: string) => ipcRenderer.invoke('memory:clearWorkingMemory', employeeId)
+  },
   mcp: {
     list: () => ipcRenderer.invoke('mcp:list'),
     add: (config: unknown) => ipcRenderer.invoke('mcp:add', config),
