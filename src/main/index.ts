@@ -236,6 +236,9 @@ function registerIpcHandlers(): void {
   ipcMain.handle('update:install', () => {
     autoUpdater.quitAndInstall()
   })
+
+  // Open URLs in the system default browser
+  ipcMain.handle('shell:openExternal', (_, url: string) => shell.openExternal(url))
 }
 
 app.whenReady().then(() => {

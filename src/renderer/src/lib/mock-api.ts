@@ -492,6 +492,9 @@ export function installMockApi() {
     settings: {
       get: async () => settings,
       update: async (s: Partial<typeof settings>) => { settings = { ...settings, ...s }; return settings }
+    },
+    shell: {
+      openExternal: async (_url: string) => {}
     }
   }
 

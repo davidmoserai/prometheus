@@ -1,8 +1,9 @@
 import { spawn, execSync, ChildProcess } from 'child_process'
 import { TOOL_IDS } from './types'
-import { writeFileSync, unlinkSync } from 'fs'
+import { writeFileSync, unlinkSync, mkdirSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
+import { mkdtempSync } from 'fs'
 
 // ============================================================
 // Types for Claude Code stream-json output
@@ -136,7 +137,7 @@ export function launchLogin(): Promise<ClaudeAuthStatus> {
 // Tool mapping: Prometheus builtin tools -> Claude Code tools
 // ============================================================
 
-const TOOL_MAP: Record<string, string[]> = {
+export const TOOL_MAP: Record<string, string[]> = {
   [TOOL_IDS.WEB_SEARCH]: ['WebSearch'],
   [TOOL_IDS.WEB_BROWSE]: ['WebFetch'],
   [TOOL_IDS.READ_FILE]: ['Read', 'Glob', 'Grep'],
@@ -196,7 +197,9 @@ export interface RunOptions {
   model: string
   enabledToolIds: string[]
   mcpServers?: { id: string; command: string; args: string[]; env?: Record<string, string> }[]
+  mcpToolNames?: string[]
   conversationHistory?: { role: string; content: string }[]
+  approvalServerPort?: number  // if set, inject PreToolUse hook into subprocess CWD
   onStream: (text: string) => void
   onToolCall?: (data: { tool: string; summary: string; detail?: string }) => void
   onFileWritten?: (data: { path: string; content: string }) => void
@@ -206,6 +209,53 @@ export interface RunOptions {
  * Run a Claude Code CLI subprocess and stream the response.
  * Returns the final accumulated text.
  */
+/** Write a temp directory with hook.js and .claude/settings.local.json for PreToolUse approval */
+function writeTempHookDir(approvalServerPort: number): string {
+  const tempDir = mkdtempSync(join(tmpdir(), 'prometheus-cc-'))
+
+  // Hook script: reads tool JSON from stdin, POSTs to approval server, exits 0 or 2
+  const hookScript = `const http = require('http'), port = +process.env.PROMETHEUS_APPROVAL_PORT
+let data = ''
+process.stdin.on('data', c => { data += c })
+process.stdin.on('end', () => {
+  try {
+    const parsed = JSON.parse(data)
+    const body = JSON.stringify({ tool_name: parsed.tool_name, tool_input: parsed.tool_input || {} })
+    const req = http.request(
+      { hostname: '127.0.0.1', port, path: '/hook', method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } },
+      (res) => {
+        let r = ''
+        res.on('data', c => { r += c })
+        res.on('end', () => {
+          try { process.exit(JSON.parse(r).approved ? 0 : 2) } catch { process.exit(0) }
+        })
+      }
+    )
+    req.on('error', () => process.exit(0))
+    req.write(body)
+    req.end()
+  } catch { process.exit(0) }
+})
+`
+  const hookPath = join(tempDir, 'hook.js')
+  writeFileSync(hookPath, hookScript)
+
+  // Settings with PreToolUse hook pointing to our script, 310s timeout (covers 5-min approval window)
+  const settings = {
+    hooks: {
+      PreToolUse: [{
+        matcher: '.*',
+        hooks: [{ type: 'command', command: `node ${hookPath}`, timeout: 310 }]
+      }]
+    }
+  }
+  mkdirSync(join(tempDir, '.claude'))
+  writeFileSync(join(tempDir, '.claude', 'settings.local.json'), JSON.stringify(settings, null, 2))
+
+  return tempDir
+}
+
 export function runClaudeCode(options: RunOptions): { promise: Promise<string>; abort: () => void } {
   const {
     prompt,
@@ -213,7 +263,9 @@ export function runClaudeCode(options: RunOptions): { promise: Promise<string>; 
     model,
     enabledToolIds,
     mcpServers,
+    mcpToolNames,
     conversationHistory,
+    approvalServerPort,
     onStream,
     onToolCall,
     onFileWritten
@@ -221,6 +273,7 @@ export function runClaudeCode(options: RunOptions): { promise: Promise<string>; 
 
   let child: ChildProcess | null = null
   let tempMcpPath: string | null = null
+  let tempHookDir: string | null = null
 
   const abort = () => {
     if (child && !child.killed) {
@@ -240,9 +293,13 @@ export function runClaudeCode(options: RunOptions): { promise: Promise<string>; 
       '--dangerously-skip-permissions'
     ]
 
-    // Map employee's enabled tools to Claude Code built-in tool names
-    // Only these tools will be available — everything else is blocked
-    const ccTools = mapToolsForCLI(enabledToolIds)
+    // Map employee's enabled builtin tools to Claude Code tool names, plus any MCP tool names.
+    // MCP tool names must be in --tools so Claude Code allows them (it's a strict allowlist).
+    // The resolved command in --mcp-config ensures the MCP server starts correctly.
+    const ccTools = [
+      ...mapToolsForCLI(enabledToolIds),
+      ...(mcpToolNames || [])
+    ]
     if (ccTools.length > 0) {
       args.push('--tools', ccTools.join(','))
     } else {
@@ -275,11 +332,21 @@ export function runClaudeCode(options: RunOptions): { promise: Promise<string>; 
     }
     fullPrompt += prompt
 
+    // Set up temp hook dir if approval server is configured
+    const spawnEnv = cleanEnv()
+    let spawnCwd: string | undefined
+    if (approvalServerPort) {
+      tempHookDir = writeTempHookDir(approvalServerPort)
+      spawnEnv.PROMETHEUS_APPROVAL_PORT = String(approvalServerPort)
+      spawnCwd = tempHookDir
+    }
+
     // Spawn the process — pipe prompt via stdin (more reliable than positional arg from Electron)
     child = spawn(getClaudeBin(), args, {
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: cleanEnv(),
-      shell: false
+      env: spawnEnv,
+      shell: false,
+      ...(spawnCwd ? { cwd: spawnCwd } : {})
     })
 
     // Write prompt to stdin and close it
@@ -372,9 +439,12 @@ export function runClaudeCode(options: RunOptions): { promise: Promise<string>; 
     })
 
     child.on('close', (code) => {
-      // Clean up temp MCP config
+      // Clean up temp MCP config and hook dir
       if (tempMcpPath) {
         try { unlinkSync(tempMcpPath) } catch {}
+      }
+      if (tempHookDir) {
+        try { rmSync(tempHookDir, { recursive: true, force: true }) } catch {}
       }
 
       // Process any remaining buffer
@@ -395,6 +465,9 @@ export function runClaudeCode(options: RunOptions): { promise: Promise<string>; 
     child.on('error', (err) => {
       if (tempMcpPath) {
         try { unlinkSync(tempMcpPath) } catch {}
+      }
+      if (tempHookDir) {
+        try { rmSync(tempHookDir, { recursive: true, force: true }) } catch {}
       }
       reject(new Error(`Failed to spawn Claude Code: ${err.message}`))
     })
