@@ -364,14 +364,21 @@ process.stdin.on('end', () => {
         let r = ''
         res.on('data', c => { r += c })
         res.on('end', () => {
-          try { process.exit(JSON.parse(r).approved ? 0 : 2) } catch { process.exit(0) }
+          try {
+            const approved = JSON.parse(r).approved
+            process.stderr.write(approved ? 'approved' : 'denied')
+            process.exit(approved ? 0 : 2)
+          } catch {
+            process.stderr.write('approved')
+            process.exit(0)
+          }
         })
       }
     )
-    req.on('error', () => process.exit(0))
+    req.on('error', () => { process.stderr.write('approved'); process.exit(0) })
     req.write(body)
     req.end()
-  } catch { process.exit(0) }
+  } catch { process.stderr.write('approved'); process.exit(0) }
 })
 `
   const hookPath = join(tempDir, 'hook.js')
