@@ -6,7 +6,7 @@ import { RecurringTask } from './types'
 /**
  * Scheduler checks recurring tasks every 60 seconds and executes any that are due.
  */
-const STUCK_TASK_THRESHOLD_MS = 5 * 60 * 1000 // 5 minutes
+const STUCK_TASK_THRESHOLD_MS = 60 * 1000 // 1 minute
 const MAX_RETRIES = 2
 
 export class Scheduler {
