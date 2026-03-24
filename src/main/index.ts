@@ -7,7 +7,8 @@ import { MCPManager } from './mcp-manager'
 import { ComposioManager, COMPOSIO_MCP_SERVER_ID, setComposioMcpConfig } from './composio-manager'
 import { Scheduler } from './scheduler'
 import { ConversationService } from './conversation-service'
-import type { MCPServerConfig } from './types'
+import type { MCPServerConfig, NativeIntegration } from './types'
+import { NATIVE_INTEGRATIONS } from './types'
 import { isClaudeCodeInstalled, getAuthStatus, launchLogin } from './claude-code-runner'
 import { initMemory, getMemory } from './memory'
 
@@ -52,6 +53,22 @@ function createWindow(): void {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
   }
 
+}
+
+// Resolve native integration config with correct app paths
+function resolveNativeConfig(integration: NativeIntegration): MCPServerConfig {
+  const appRoot = app.isPackaged
+    ? join(app.getAppPath(), '..')
+    : join(__dirname, '../..')
+  return {
+    id: integration.id,
+    name: integration.name,
+    command: integration.config.command,
+    args: integration.config.args.map(a => a.replace('PROMETHEUS_APP_PATH', appRoot)),
+    env: integration.config.env,
+    enabled: true,
+    isNative: true
+  }
 }
 
 function registerIpcHandlers(): void {
@@ -300,6 +317,45 @@ function registerIpcHandlers(): void {
     }
   })
 
+  // Native Integrations IPC Handlers
+  ipcMain.handle('native:list', () => {
+    const s = store.getSettings()
+    const enabledIds = s.enabledNativeIntegrations || []
+    return NATIVE_INTEGRATIONS.map(n => ({
+      ...n,
+      enabled: enabledIds.includes(n.id)
+    }))
+  })
+
+  ipcMain.handle('native:toggle', async (_event, id: string, enabled: boolean) => {
+    const s = store.getSettings()
+    const enabledIds = new Set(s.enabledNativeIntegrations || [])
+    if (enabled) {
+      enabledIds.add(id)
+    } else {
+      enabledIds.delete(id)
+    }
+    store.updateSettings({ enabledNativeIntegrations: [...enabledIds] })
+
+    // Connect or disconnect the MCP server
+    const integration = NATIVE_INTEGRATIONS.find(n => n.id === id)
+    if (!integration) return { success: false, error: 'Unknown integration' }
+
+    if (enabled) {
+      try {
+        const config = resolveNativeConfig(integration)
+        mcpManager.registerConfig(config)
+        const tools = await mcpManager.connect(config)
+        return { success: true, tools }
+      } catch (err) {
+        return { success: false, error: err instanceof Error ? err.message : 'Connection failed' }
+      }
+    } else {
+      await mcpManager.disconnect(id)
+      return { success: true, tools: [] }
+    }
+  })
+
   // Composio Integrations IPC Handlers
   ipcMain.handle('composio:hasApiKey', () => {
     return !!store.getComposioApiKey()
@@ -443,11 +499,21 @@ app.whenReady().then(async () => {
   }
 
   agentManager = new AgentManager(store, mcpManager, convService)
-  // Register non-Composio MCP server configs for lazy connection (connect on first use)
-  const customServers = (settings.mcpServers || []).filter(s => !s.isComposio)
+
+  // Register custom MCP server configs for lazy connection (connect on first use)
+  const customServers = (settings.mcpServers || []).filter(s => !s.isComposio && !s.isNative)
   for (const server of customServers) {
     if (server.enabled) mcpManager.registerConfig(server)
   }
+
+  // Register enabled native integrations for lazy connection
+  const enabledNativeIds = settings.enabledNativeIntegrations || []
+  for (const integration of NATIVE_INTEGRATIONS) {
+    if (enabledNativeIds.includes(integration.id)) {
+      mcpManager.registerConfig(resolveNativeConfig(integration))
+    }
+  }
+
   mcpManager.startIdleMonitor()
 
   // Wire MCP status changes to frontend for in-app notifications

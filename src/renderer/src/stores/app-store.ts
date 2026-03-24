@@ -70,6 +70,7 @@ interface MCPServerConfig {
   url?: string
   headers?: Record<string, string>
   isComposio?: boolean
+  isNative?: boolean
 }
 
 interface PermissionSet {

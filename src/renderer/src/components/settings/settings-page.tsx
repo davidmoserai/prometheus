@@ -124,6 +124,28 @@ export function SettingsPage() {
   const [mcpDiscoveredTools, setMcpDiscoveredTools] = useState<string[] | null>(null)
   const [showEnvValues, setShowEnvValues] = useState<Record<string, boolean>>({})
 
+  // Native integrations state
+  const [nativeIntegrations, setNativeIntegrations] = useState<Array<{ id: string; name: string; description: string; icon: string; enabled: boolean }>>([])
+  const [nativeToggling, setNativeToggling] = useState<string | null>(null)
+
+  // Load native integrations on mount
+  useEffect(() => {
+    window.api?.native?.list().then(setNativeIntegrations).catch(() => {})
+  }, [])
+
+  const handleNativeToggle = async (id: string, enabled: boolean) => {
+    setNativeToggling(id)
+    try {
+      const result = await window.api.native.toggle(id, enabled)
+      if (result.success) {
+        setNativeIntegrations(prev => prev.map(n => n.id === id ? { ...n, enabled } : n))
+        // Reload MCP tool names so employee editor picks up new tools
+        await loadMcpServers()
+      }
+    } catch {}
+    setNativeToggling(null)
+  }
+
   useEffect(() => {
     if (settings) {
       setProviders(settings.providers)
@@ -243,7 +265,7 @@ export function SettingsPage() {
     // Generate unique ID (append suffix if duplicate exists)
     let baseId = configName.toLowerCase().replace(/[^a-z0-9]+/g, '-')
     let id = baseId
-    const existingIds = new Set(mcpServers.filter(s => !s.isComposio).map(s => s.id))
+    const existingIds = new Set(mcpServers.filter(s => !s.isComposio && !s.isNative).map(s => s.id))
     let suffix = 2
     while (existingIds.has(id)) {
       id = `${baseId}-${suffix++}`
@@ -589,6 +611,50 @@ export function SettingsPage() {
           <IntegrationsSection />
         </div>
 
+        {/* Native Integrations Section */}
+        {nativeIntegrations.length > 0 && (
+          <div style={{ marginBottom: '56px' }}>
+            <div className="flex items-center" style={{ gap: '10px', marginBottom: '20px' }}>
+              <Wrench className="w-4 h-4 text-flame-400 drop-shadow-[0_0_6px_rgba(249,115,22,0.4)]" />
+              <div>
+                <h3 className="text-[16px] font-semibold text-text-primary tracking-tight">Built-in Tools</h3>
+                <p className="text-xs text-text-tertiary" style={{ marginTop: '2px' }}>Toggle pre-built integrations on or off</p>
+              </div>
+            </div>
+            <div className="flex flex-col" style={{ gap: '10px' }}>
+              {nativeIntegrations.map((integration) => (
+                <div
+                  key={integration.id}
+                  className={`flex items-center justify-between rounded-2xl border transition-all duration-300 ${
+                    integration.enabled
+                      ? 'bg-bg-elevated border-border-default'
+                      : 'bg-bg-secondary border-border-subtle'
+                  }`}
+                  style={{ padding: '20px 24px' }}
+                >
+                  <div className="flex items-center" style={{ gap: '16px' }}>
+                    <span className="text-xl">{integration.icon}</span>
+                    <div>
+                      <h4 className="font-semibold text-text-primary text-[14px]">{integration.name}</h4>
+                      <p className="text-[12px] text-text-tertiary" style={{ marginTop: '2px' }}>{integration.description}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center" style={{ gap: '8px' }}>
+                    {nativeToggling === integration.id && (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-text-tertiary" />
+                    )}
+                    <Switch
+                      checked={integration.enabled}
+                      onCheckedChange={(checked) => handleNativeToggle(integration.id, checked)}
+                      disabled={nativeToggling === integration.id}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Custom Integrations (Advanced) Section */}
         <div className="flex flex-col" style={{ gap: '12px', marginTop: '0' }}>
           <div className="flex items-center justify-between" style={{ marginBottom: '20px' }}>
@@ -796,7 +862,7 @@ export function SettingsPage() {
           )}
 
           {/* MCP Server List (exclude Composio — shown in Integrations section above) */}
-          {mcpServers.filter(s => !s.isComposio).length === 0 && !showMcpForm && (
+          {mcpServers.filter(s => !s.isComposio && !s.isNative).length === 0 && !showMcpForm && (
             <div className="rounded-2xl border border-dashed border-border-default bg-bg-secondary text-center" style={{ padding: '40px' }}>
               <Server className="w-8 h-8 text-text-tertiary mx-auto" style={{ marginBottom: '12px' }} />
               <p className="text-[13px] text-text-tertiary">No MCP servers configured.</p>
@@ -804,7 +870,7 @@ export function SettingsPage() {
             </div>
           )}
 
-          {mcpServers.filter(s => !s.isComposio).map((server, i) => {
+          {mcpServers.filter(s => !s.isComposio && !s.isNative).map((server, i) => {
             const toolNames = mcpToolNames[server.id] || []
             const isConnected = server.enabled && toolNames.length > 0
 
