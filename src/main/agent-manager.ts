@@ -1289,6 +1289,7 @@ export class AgentManager {
       // No threadId passed — task conversations are ephemeral and stored in task.messages, not Mastra memory
       let responseText: string
       if (provider.id === 'claude-code') {
+        console.log(`Task "${task.id}" executing via Claude Code (conversationId: ${task.conversationId || 'NONE'})`)
         responseText = await this.runClaudeCodeAgent(
           toEmployee, systemPrompt, messages, taskStreamCb,
           task.conversationId,
@@ -1298,6 +1299,7 @@ export class AgentManager {
             if (current) this.onTaskUpdate?.(current)
           },
         )
+        console.log(`Task "${task.id}" Claude Code response (${responseText.length} chars): ${responseText.slice(0, 100)}...`)
       } else {
         responseText = await this.runAgent(
           provider, toEmployee, systemPrompt, messages, taskStreamCb,
@@ -1392,7 +1394,7 @@ export class AgentManager {
     const messages: { role: 'user' | 'assistant' | 'system'; content: string }[] = [
       { role: 'user', content: brief },
       ...(updatedTask.messages || [])
-        .filter(m => m.role !== 'tool')
+        .filter(m => m.role !== 'tool' && m.content !== '...')
         .map(m => ({
           role: (m.role === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
           content: m.content

@@ -15,7 +15,8 @@ import {
   Pencil,
   Wrench,
   Bot,
-  User
+  User,
+  Square
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -645,22 +646,31 @@ export function TasksPage() {
                                   </div>
                                 )}
 
-                                {/* Reply input */}
-                                {(task.status === 'in_progress' || task.status === 'escalated') && (
+                                {/* Reply input (or stop button if agent is working) */}
+                                {(task.status === 'in_progress' || task.status === 'escalated') && (() => {
+                                  const isAgentWorking = isReplying || (task.status === 'in_progress' && task.messages.length > 0 && task.messages[task.messages.length - 1]?.content === '...')
+                                  return (
                                   <div style={{ marginBottom: '20px' }}>
                                     <div className="flex" style={{ gap: '8px' }}>
                                       <input
                                         value={expandedTaskId === task.id ? replyText : ''}
                                         onChange={(e) => setReplyText(e.target.value)}
-                                        onKeyDown={(e) => e.key === 'Enter' && handleReply(task.id)}
-                                        placeholder="Reply to this task..."
+                                        onKeyDown={(e) => e.key === 'Enter' && !isAgentWorking && handleReply(task.id)}
+                                        placeholder={isAgentWorking ? 'Agent is working...' : 'Reply to this task...'}
                                         className="flex-1 rounded-lg bg-bg-tertiary border border-border-default text-[13px] text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-flame-500/30"
                                         style={{ padding: '10px 14px' }}
-                                        disabled={isReplying}
+                                        disabled={isAgentWorking}
                                       />
-                                      <Button size="sm" onClick={() => handleReply(task.id)} disabled={!replyText.trim() || isReplying} style={isReplying ? { cursor: 'not-allowed' } : undefined}>
-                                        {isReplying ? 'Sending...' : 'Send'}
-                                      </Button>
+                                      {isAgentWorking && task.conversationId ? (
+                                        <Button size="sm" variant="secondary" onClick={() => stopMessage(task.conversationId!)}>
+                                          <Square className="w-3 h-3" />
+                                          Stop
+                                        </Button>
+                                      ) : (
+                                        <Button size="sm" onClick={() => handleReply(task.id)} disabled={!replyText.trim() || isAgentWorking}>
+                                          Send
+                                        </Button>
+                                      )}
                                     </div>
                                     {replyError && expandedTaskId === task.id && (
                                       <div className="rounded-lg bg-ember-500/10 border border-ember-500/20" style={{ padding: '10px 14px', marginTop: '8px' }}>
@@ -668,7 +678,8 @@ export function TasksPage() {
                                       </div>
                                     )}
                                   </div>
-                                )}
+                                  )
+                                })()}
 
                                 {/* Actions */}
                                 <div className="flex items-center justify-between">
