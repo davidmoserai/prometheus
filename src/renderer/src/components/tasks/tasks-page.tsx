@@ -17,6 +17,8 @@ import {
   Bot,
   User
 } from 'lucide-react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { Badge } from '@/components/ui/badge'
 import { ChatTextarea, SendButton, StopButton } from '@/components/ui/chat-input'
 import { Button } from '@/components/ui/button'
@@ -611,7 +613,13 @@ export function TasksPage() {
                                               {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                             </span>
                                           </div>
-                                          <p className={`text-[13px] ${msg.role === 'tool' ? 'text-text-tertiary' : 'text-text-primary'} whitespace-pre-wrap`}>{msg.content}</p>
+                                          {msg.role === 'tool' ? (
+                                            <p className="text-[13px] text-text-tertiary whitespace-pre-wrap">{msg.content}</p>
+                                          ) : (
+                                            <div className="text-[13px] text-text-primary chat-markdown">
+                                              <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+                                            </div>
+                                          )}
                                         </div>
                                       ))}
                                       {/* Working indicator (no stop — stop is on the reply input) */}
@@ -649,7 +657,9 @@ export function TasksPage() {
                                     style={{ padding: '20px', marginBottom: '20px' }}
                                   >
                                     <p className="text-[13px] text-emerald-400 font-semibold" style={{ marginBottom: '8px' }}>Response</p>
-                                    <p className="text-[13px] text-text-secondary whitespace-pre-wrap">{task.response}</p>
+                                    <div className="text-[13px] text-text-secondary chat-markdown">
+                                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{task.response}</ReactMarkdown>
+                                    </div>
                                   </div>
                                 )}
 
