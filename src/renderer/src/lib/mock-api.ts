@@ -492,7 +492,8 @@ export function installMockApi() {
       update: async (_id: string, _updates: unknown) => ({ success: true, tools: [] }),
       remove: async (_id: string) => ({ success: true }),
       getTools: async (_serverId: string) => ['mock_tool_1', 'mock_tool_2'],
-      testConnection: async (_config: unknown) => ({ success: true, tools: ['mock_tool_1', 'mock_tool_2'] })
+      testConnection: async (_config: unknown) => ({ success: true, tools: ['mock_tool_1', 'mock_tool_2'] }),
+      onStatusChange: () => () => {}
     },
     settings: {
       get: async () => settings,

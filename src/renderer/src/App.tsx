@@ -152,6 +152,25 @@ export default function App() {
     return unsub
   }, [])
 
+  // Listen for MCP server status changes (health check failures, idle disconnects)
+  useEffect(() => {
+    if (!window.api?.mcp?.onStatusChange) return
+    const unsub = window.api.mcp.onStatusChange((data) => {
+      if (data.status === 'error' || data.status === 'disconnected') {
+        const mcpServers = useAppStore.getState().mcpServers
+        const serverName = mcpServers.find(s => s.id === data.serverId)?.name || data.serverId
+        useAppStore.getState().addNotification({
+          type: 'info',
+          title: 'MCP Server Disconnected',
+          body: `${serverName} disconnected${data.error ? `: ${data.error}` : ''}`
+        })
+        // Reload MCP server list to reflect updated connection status
+        useAppStore.getState().loadMcpServers()
+      }
+    })
+    return unsub
+  }, [])
+
   // Listen for auto-update downloaded event
   useEffect(() => {
     if (!window.api?.updates?.onDownloaded) return

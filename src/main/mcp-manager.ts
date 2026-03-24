@@ -78,6 +78,14 @@ export class MCPManager {
   private clients: Map<string, MCPClient> = new Map()
   private toolCache: Map<string, Record<string, Tool>> = new Map()
   private resolvedCommands: Map<string, { command: string; args: string[] }> = new Map()
+  private configs = new Map<string, MCPServerConfig>()
+  private lastUsed = new Map<string, number>()
+  private connecting = new Map<string, Promise<string[]>>()
+  private idleTimer: ReturnType<typeof setInterval> | null = null
+  private IDLE_TIMEOUT_MS = 30 * 60 * 1000 // 30 minutes (MCP servers can take 30-90s to start)
+
+  // Callback for notifying frontend of connection status changes
+  onStatusChange?: (serverId: string, status: 'connected' | 'disconnected' | 'error', error?: string) => void
 
   /**
    * Connect to an MCP server and discover its tools.
@@ -138,6 +146,115 @@ export class MCPManager {
     return result
   }
 
+  /**
+   * Register a server config for lazy connection (no actual connection is made).
+   */
+  registerConfig(config: MCPServerConfig): void {
+    this.configs.set(config.id, config)
+  }
+
+  /**
+   * Remove a registered config (called when a server is deleted).
+   */
+  removeConfig(serverId: string): void {
+    this.configs.delete(serverId)
+    this.lastUsed.delete(serverId)
+  }
+
+  /**
+   * Lazily connect to a server on first use. Deduplicates concurrent calls.
+   */
+  async ensureConnected(serverId: string): Promise<void> {
+    // Already connected — just touch lastUsed
+    if (this.clients.has(serverId)) {
+      this.lastUsed.set(serverId, Date.now())
+      return
+    }
+
+    // Already connecting — await the in-flight promise
+    const inflight = this.connecting.get(serverId)
+    if (inflight) {
+      await inflight
+      return
+    }
+
+    // Need to connect — look up registered config
+    const config = this.configs.get(serverId)
+    if (!config) throw new Error(`No registered config for MCP server "${serverId}"`)
+
+    const connectPromise = this.connect(config)
+    this.connecting.set(serverId, connectPromise)
+    try {
+      await connectPromise
+      this.lastUsed.set(serverId, Date.now())
+    } finally {
+      this.connecting.delete(serverId)
+    }
+  }
+
+  /**
+   * Start the idle monitor that disconnects servers idle for 10+ minutes
+   * and health-checks connected servers every 60s.
+   */
+  startIdleMonitor(): void {
+    if (this.idleTimer) return
+
+    this.idleTimer = setInterval(async () => {
+      const now = Date.now()
+
+      // Snapshot entries to avoid mutating the Map during iteration
+      const entries = Array.from(this.clients.entries())
+
+      for (const [serverId, client] of entries) {
+        // Skip if already disconnected by a previous iteration step
+        if (!this.clients.has(serverId)) continue
+
+        const lastUsedAt = this.lastUsed.get(serverId) || 0
+
+        // Disconnect idle servers
+        if (now - lastUsedAt > this.IDLE_TIMEOUT_MS) {
+          console.log(`MCP server "${serverId}" idle for 30+ min, disconnecting`)
+          await this.disconnect(serverId)
+          this.onStatusChange?.(serverId, 'disconnected')
+          continue
+        }
+
+        // Health check: ping connected servers with a 5s timeout
+        let timer: ReturnType<typeof setTimeout>
+        try {
+          const healthPromise = client.listToolsets()
+          const timeoutPromise = new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new Error('Health check timeout')), 5000)
+          })
+          await Promise.race([healthPromise, timeoutPromise])
+        } catch (err) {
+          console.log(`MCP server "${serverId}" failed health check, disconnecting`)
+          await this.disconnect(serverId)
+          this.onStatusChange?.(serverId, 'error', err instanceof Error ? err.message : 'Health check failed')
+        } finally {
+          clearTimeout(timer!)
+        }
+      }
+    }, 60_000)
+  }
+
+  /**
+   * Stop the idle monitor.
+   */
+  stopIdleMonitor(): void {
+    if (this.idleTimer) {
+      clearInterval(this.idleTimer)
+      this.idleTimer = null
+    }
+  }
+
+  /**
+   * Check if a server is currently connected.
+   */
+  isConnected(serverId: string): boolean {
+    return this.clients.has(serverId)
+  }
+
   async connect(config: MCPServerConfig): Promise<string[]> {
     // Disconnect existing client if reconnecting
     await this.disconnect(config.id)
@@ -190,16 +307,22 @@ export class MCPManager {
 
     // Discover tools with a timeout (longer for servers that need auth + gateway startup)
     const timeoutMs = config.transport === 'http' ? 30000 : 90000
+    let connectTimer: ReturnType<typeof setTimeout>
     const toolsetPromise = client.listToolsets()
-    const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error(
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      connectTimer = setTimeout(() => reject(new Error(
         config.transport === 'http'
           ? `Connection timed out after ${timeoutMs / 1000}s — check your Composio API key and internet connection`
           : `Connection timed out after ${timeoutMs / 1000}s — the server may need browser auth. Try running it manually first: ${config.command} ${config.args.join(' ')}`
       )), timeoutMs)
-    )
+    })
 
-    const toolsets = await Promise.race([toolsetPromise, timeoutPromise])
+    let toolsets: Awaited<ReturnType<MCPClient['listToolsets']>>
+    try {
+      toolsets = await Promise.race([toolsetPromise, timeoutPromise])
+    } finally {
+      clearTimeout(connectTimer!)
+    }
     const serverTools = toolsets[config.id] || {}
     this.toolCache.set(config.id, serverTools)
 
@@ -210,6 +333,10 @@ export class MCPManager {
    * Get tools from a connected MCP server (returns Mastra Tool objects).
    */
   getTools(serverId: string): Record<string, Tool> {
+    // Touch lastUsed to prevent idle timeout during active use
+    if (this.clients.has(serverId)) {
+      this.lastUsed.set(serverId, Date.now())
+    }
     return this.toolCache.get(serverId) || {}
   }
 
@@ -265,31 +392,9 @@ export class MCPManager {
    * Disconnect all MCP servers.
    */
   async disconnectAll(): Promise<void> {
+    this.stopIdleMonitor()
     const ids = Array.from(this.clients.keys())
     await Promise.allSettled(ids.map(id => this.disconnect(id)))
-  }
-
-  /**
-   * Connect to all enabled MCP servers from config.
-   * Returns a map of serverId -> tool names (or error message).
-   */
-  async connectAll(configs: MCPServerConfig[]): Promise<Record<string, { tools?: string[]; error?: string }>> {
-    const results: Record<string, { tools?: string[]; error?: string }> = {}
-
-    await Promise.allSettled(
-      configs.filter(c => c.enabled).map(async (config) => {
-        try {
-          const toolNames = await this.connect(config)
-          results[config.id] = { tools: toolNames }
-        } catch (err) {
-          results[config.id] = {
-            error: err instanceof Error ? err.message : 'Unknown connection error'
-          }
-        }
-      })
-    )
-
-    return results
   }
 
   /**

@@ -238,8 +238,9 @@ function registerIpcHandlers(): void {
     const servers = [...(s.mcpServers || []), config]
     store.updateSettings({ mcpServers: servers })
 
-    // Connect and discover tools
+    // Register config for lazy connection and connect immediately for tool discovery
     if (config.enabled) {
+      mcpManager.registerConfig(config)
       try {
         const toolNames = await mcpManager.connect(config)
         return { success: true, tools: toolNames }
@@ -257,9 +258,10 @@ function registerIpcHandlers(): void {
     )
     store.updateSettings({ mcpServers: servers })
 
-    // Reconnect if enabled, disconnect if disabled
+    // Update registered config and reconnect if enabled, disconnect if disabled
     const updated = servers.find(srv => srv.id === id)
     if (updated) {
+      mcpManager.registerConfig(updated)
       if (updated.enabled) {
         try {
           const toolNames = await mcpManager.connect(updated)
@@ -277,6 +279,8 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle('mcp:remove', async (_event, id: string) => {
     await mcpManager.disconnect(id)
+    // Remove from registered configs (for lazy connection tracking)
+    mcpManager.removeConfig(id)
     const s = store.getSettings()
     const servers = (s.mcpServers || []).filter(srv => srv.id !== id)
     store.updateSettings({ mcpServers: servers })
@@ -439,12 +443,16 @@ app.whenReady().then(async () => {
   }
 
   agentManager = new AgentManager(store, mcpManager, convService)
-  // Connect only non-Composio MCP servers on startup (Composio connects separately)
+  // Register non-Composio MCP server configs for lazy connection (connect on first use)
   const customServers = (settings.mcpServers || []).filter(s => !s.isComposio)
-  if (customServers.length > 0) {
-    mcpManager.connectAll(customServers).catch(err => {
-      console.error('Failed to connect MCP servers on startup:', err)
-    })
+  for (const server of customServers) {
+    if (server.enabled) mcpManager.registerConfig(server)
+  }
+  mcpManager.startIdleMonitor()
+
+  // Wire MCP status changes to frontend for in-app notifications
+  mcpManager.onStatusChange = (serverId, status, error) => {
+    mainWindow?.webContents.send('mcp:statusChange', { serverId, status, error })
   }
 
   // Connect Composio if API key is configured
@@ -542,15 +550,37 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 
-app.on('before-quit', async () => {
-  // Abort any active agent streams
-  agentManager?.abortAllStreams()
+let isQuitting = false
 
-  // Cancel any pending tool approvals
+app.on('before-quit', (event) => {
+  if (isQuitting) return // Let the re-triggered quit proceed
+
+  event.preventDefault()
+  isQuitting = true
+
+  // Abort any active agent streams and pending approvals
+  agentManager?.abortAllStreams()
   agentManager?.cancelAllPendingApprovals()
 
-  // Gracefully disconnect MCP servers on quit
-  if (mcpManager) {
-    await mcpManager.disconnectAll()
+  // Gracefully disconnect MCP servers with a 5s timeout, then re-quit
+  const cleanup = async () => {
+    try {
+      await Promise.race([
+        mcpManager?.disconnectAll(),
+        new Promise(resolve => setTimeout(resolve, 5000))
+      ])
+    } finally {
+      app.quit()
+    }
   }
+  cleanup()
+})
+
+// Safety net: force-kill any remaining child processes on exit (catches crashes and SIGKILL)
+process.on('exit', () => {
+  try {
+    require('child_process').execSync(`pkill -P ${process.pid}`, {
+      stdio: 'ignore', timeout: 2000
+    })
+  } catch { /* no children or already dead */ }
 })
