@@ -243,7 +243,7 @@ export function SettingsPage() {
     // Generate unique ID (append suffix if duplicate exists)
     let baseId = configName.toLowerCase().replace(/[^a-z0-9]+/g, '-')
     let id = baseId
-    const existingIds = new Set(mcpServers.map(s => s.id))
+    const existingIds = new Set(mcpServers.filter(s => !s.isComposio).map(s => s.id))
     let suffix = 2
     while (existingIds.has(id)) {
       id = `${baseId}-${suffix++}`
@@ -795,8 +795,8 @@ export function SettingsPage() {
             </Card>
           )}
 
-          {/* MCP Server List */}
-          {mcpServers.length === 0 && !showMcpForm && (
+          {/* MCP Server List (exclude Composio — shown in Integrations section above) */}
+          {mcpServers.filter(s => !s.isComposio).length === 0 && !showMcpForm && (
             <div className="rounded-2xl border border-dashed border-border-default bg-bg-secondary text-center" style={{ padding: '40px' }}>
               <Server className="w-8 h-8 text-text-tertiary mx-auto" style={{ marginBottom: '12px' }} />
               <p className="text-[13px] text-text-tertiary">No MCP servers configured.</p>
@@ -804,7 +804,7 @@ export function SettingsPage() {
             </div>
           )}
 
-          {mcpServers.map((server, i) => {
+          {mcpServers.filter(s => !s.isComposio).map((server, i) => {
             const toolNames = mcpToolNames[server.id] || []
             const isConnected = server.enabled && toolNames.length > 0
 

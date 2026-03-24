@@ -530,7 +530,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const fetched = await window.api.conversations.list(employeeId)
     set((state) => ({
       // Merge: keep existing conversation if it has more messages (e.g. streamed but not yet persisted)
-      conversations: fetched.map(fresh => {
+      conversations: fetched.map((fresh: Conversation) => {
         const existing = state.conversations.find(c => c.id === fresh.id)
         return existing && existing.messages.length > fresh.messages.length ? existing : fresh
       })
@@ -558,7 +558,20 @@ export const useAppStore = create<AppState>((set, get) => ({
   sendMessage: async (conversationId, message) => {
     // Clear previous streaming parts at the start of a new turn
     get().clearStreamingParts(conversationId)
-    set((state) => ({ sendingConversationIds: new Set([...state.sendingConversationIds, conversationId]) }))
+
+    // Optimistically add user message so it appears immediately
+    const tempUserMsg: ChatMessage = {
+      id: `temp-${Date.now()}`,
+      role: 'user',
+      content: message,
+      timestamp: new Date().toISOString()
+    }
+    set((state) => ({
+      sendingConversationIds: new Set([...state.sendingConversationIds, conversationId]),
+      conversations: state.conversations.map(c =>
+        c.id === conversationId ? { ...c, messages: [...c.messages, tempUserMsg] } : c
+      )
+    }))
     try {
       await window.api.chat.send(conversationId, message)
       // Refetch to ensure all messages are present (messageStored events may arrive after invoke resolves)

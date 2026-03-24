@@ -8,7 +8,7 @@ import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useAppStore, type Conversation, type ChatMessage, type ChatAttachment, type StreamPart } from '@/stores/app-store'
 
 // Open links externally; used by both ReactMarkdown instances
-const markdownComponents = {
+const markdownComponents: Record<string, React.ComponentType<any>> = {
   a: ({ href, children }: { href?: string; children: React.ReactNode }) => (
     <a
       href={href}
