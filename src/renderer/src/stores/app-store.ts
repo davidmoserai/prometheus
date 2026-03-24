@@ -269,7 +269,7 @@ interface AppState {
   loadConversations: (employeeId: string) => Promise<void>
   createConversation: (employeeId: string) => Promise<Conversation>
   deleteConversation: (conversationId: string) => Promise<void>
-  sendMessage: (conversationId: string, message: string) => Promise<void>
+  sendMessage: (conversationId: string, message: string, attachments?: ChatAttachment[]) => Promise<void>
   stopMessage: (conversationId: string) => void
   uploadFile: (conversationId: string, filePath: string) => Promise<ChatAttachment>
 
@@ -556,7 +556,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  sendMessage: async (conversationId, message) => {
+  sendMessage: async (conversationId, message, attachments) => {
     // Clear previous streaming parts at the start of a new turn
     get().clearStreamingParts(conversationId)
 
@@ -574,7 +574,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       )
     }))
     try {
-      await window.api.chat.send(conversationId, message)
+      await window.api.chat.send(conversationId, message, attachments)
       // Refetch to ensure all messages are present (messageStored events may arrive after invoke resolves)
       const conv = await window.api.conversations.get(conversationId)
       if (conv) {

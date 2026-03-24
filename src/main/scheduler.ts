@@ -75,8 +75,8 @@ export class Scheduler {
       const companyId = this.store.getActiveCompanyId() || ''
       const conv = await this.convService.createConversation(task.employeeId, companyId)
 
-      // Send the brief as a message
-      await this.agentManager.sendMessage(
+      // Send the brief as a message and wait for the agent to finish
+      const result = await this.agentManager.sendMessage(
         conv.id,
         `[Scheduled Task: ${task.name}]\n\n${task.brief}`,
         () => {},
@@ -84,8 +84,12 @@ export class Scheduler {
         true // skipApproval — automated tasks run without user approval gates
       )
 
-      // Mark the delegated task as completed
-      this.store.updateTask(delegatedTask.id, { status: 'completed' })
+      // Check the result before marking completed — only mark completed if we got a real response
+      const isError = result.content.startsWith('Failed to get response:') || result.content === '[Stopped]'
+      this.store.updateTask(delegatedTask.id, {
+        status: isError ? 'escalated' : 'completed',
+        response: result.content
+      })
     } catch (err) {
       console.error('Recurring task execution failed:', err)
     }

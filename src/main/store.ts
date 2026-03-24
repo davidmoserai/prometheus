@@ -125,6 +125,17 @@ export class EmployeeStore {
             raw.settings.composioApiKey = decryptString(raw.settings.composioApiKey)
           }
 
+          // Decrypt MCP server env var values
+          if (raw.settings?.mcpServers) {
+            for (const server of raw.settings.mcpServers) {
+              if (server.env) {
+                for (const key of Object.keys(server.env)) {
+                  if (server.env[key]) server.env[key] = decryptString(server.env[key])
+                }
+              }
+            }
+          }
+
           return raw as StoreData
         }
 
@@ -228,6 +239,17 @@ export class EmployeeStore {
     }
     if (clone.settings?.composioApiKey) {
       clone.settings.composioApiKey = encryptString(clone.settings.composioApiKey)
+    }
+
+    // Encrypt MCP server env var values
+    if (clone.settings?.mcpServers) {
+      for (const server of clone.settings.mcpServers) {
+        if (server.env) {
+          for (const key of Object.keys(server.env)) {
+            if (server.env[key]) server.env[key] = encryptString(server.env[key])
+          }
+        }
+      }
     }
 
     writeFileSync(this.dataPath, JSON.stringify(clone, null, 2))

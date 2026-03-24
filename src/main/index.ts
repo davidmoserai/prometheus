@@ -148,7 +148,7 @@ function registerIpcHandlers(): void {
   })
 
   // Chat IPC Handler
-  ipcMain.handle('chat:send', async (_event, conversationId: string, message: string) => {
+  ipcMain.handle('chat:send', async (_event, conversationId: string, message: string, attachments?: any[]) => {
     return agentManager.sendMessage(
       conversationId,
       message,
@@ -157,7 +157,9 @@ function registerIpcHandlers(): void {
       },
       (msg) => {
         mainWindow?.webContents.send('chat:messageStored', { conversationId, message: msg })
-      }
+      },
+      false,
+      attachments
     )
   })
 
