@@ -236,6 +236,22 @@ function registerIpcHandlers(): void {
   ipcMain.handle('mcp:list', () => {
     const s = store.getSettings()
     const servers = s.mcpServers || []
+
+    // Include connected native integrations
+    const enabledNativeIds = s.enabledNativeIntegrations || []
+    for (const integration of NATIVE_INTEGRATIONS) {
+      if (enabledNativeIds.includes(integration.id)) {
+        servers.push({
+          id: integration.id,
+          name: integration.name,
+          command: '',
+          args: [],
+          enabled: true,
+          isNative: true
+        })
+      }
+    }
+
     // Include the in-memory Composio MCP server if it's connected (not persisted to disk)
     const composioTools = mcpManager.getToolNames(COMPOSIO_MCP_SERVER_ID)
     if (composioTools.length > 0) {
@@ -508,13 +524,21 @@ app.whenReady().then(async () => {
     if (server.enabled) mcpManager.registerConfig(server)
   }
 
-  // Register enabled native integrations for lazy connection
+  // Connect enabled native integrations before window loads (user explicitly toggled these on)
   const enabledNativeIds = settings.enabledNativeIntegrations || []
-  for (const integration of NATIVE_INTEGRATIONS) {
-    if (enabledNativeIds.includes(integration.id)) {
-      mcpManager.registerConfig(resolveNativeConfig(integration))
-    }
-  }
+  const nativeConnects = NATIVE_INTEGRATIONS
+    .filter(n => enabledNativeIds.includes(n.id))
+    .map(async (integration) => {
+      const config = resolveNativeConfig(integration)
+      mcpManager.registerConfig(config)
+      try {
+        const tools = await mcpManager.connect(config)
+        console.log(`Native integration "${integration.name}" connected: ${tools.length} tools`)
+      } catch (err) {
+        console.error(`Failed to connect native integration "${integration.name}":`, err)
+      }
+    })
+  await Promise.allSettled(nativeConnects)
 
   mcpManager.startIdleMonitor()
 

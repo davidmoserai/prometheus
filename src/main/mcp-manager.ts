@@ -154,6 +154,13 @@ export class MCPManager {
   }
 
   /**
+   * Get a registered config by ID.
+   */
+  getRegisteredConfig(serverId: string): MCPServerConfig | undefined {
+    return this.configs.get(serverId)
+  }
+
+  /**
    * Remove a registered config (called when a server is deleted).
    */
   removeConfig(serverId: string): void {
@@ -325,6 +332,7 @@ export class MCPManager {
     }
     const serverTools = toolsets[config.id] || {}
     this.toolCache.set(config.id, serverTools)
+    this.lastUsed.set(config.id, Date.now())
 
     return Object.keys(serverTools)
   }
