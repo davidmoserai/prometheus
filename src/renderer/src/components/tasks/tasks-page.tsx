@@ -15,14 +15,12 @@ import {
   Pencil,
   Wrench,
   Bot,
-  User,
-  Square
+  User
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
+import { ChatTextarea, SendButton, StopButton } from '@/components/ui/chat-input'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
-import { ToolApprovalCard } from '@/components/ui/tool-approval-card'
-import { AgentWorkingIndicator } from '@/components/ui/agent-working-indicator'
 import { useAppStore, type Task, type RecurringTask } from '@/stores/app-store'
 
 const STATUS_CONFIG = {
@@ -73,15 +71,12 @@ export function TasksPage() {
     tasks,
     employees,
     recurringTasks,
-    pendingApprovals,
     updateTask,
     deleteTask,
     replyToTask,
-    respondToApproval,
     createRecurringTask,
     updateRecurringTask,
-    deleteRecurringTask,
-    stopMessage
+    deleteRecurringTask
   } = useAppStore()
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null)
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
@@ -538,6 +533,15 @@ export function TasksPage() {
                                 </p>
                               </div>
 
+                              <Badge className={priorityConf.className}>
+                                {priorityConf.label}
+                              </Badge>
+
+                              {task.deadline && (
+                                <span className="text-[12px] text-text-tertiary shrink-0">
+                                  {task.deadline}
+                                </span>
+                              )}
                             </button>
 
                             {/* Expanded details */}
@@ -555,6 +559,8 @@ export function TasksPage() {
                                   <div className="flex flex-col text-text-tertiary" style={{ gap: '4px' }}>
                                     <p><span className="text-text-secondary">To:</span> {getEmployeeName(task.toEmployeeId)}</p>
                                     <p><span className="text-text-secondary">From:</span> {getEmployeeName(task.fromEmployeeId)}</p>
+                                    <p><span className="text-text-secondary">Priority:</span> <span className={PRIORITY_CONFIG[task.priority].className.split(' ')[1]}>{task.priority.charAt(0).toUpperCase() + task.priority.slice(1)}</span></p>
+                                    {task.deadline && <p><span className="text-text-secondary">Deadline:</span> {task.deadline}</p>}
                                   </div>
 
                                   <div style={{ marginTop: '16px' }}>
@@ -584,11 +590,11 @@ export function TasksPage() {
                                 </div>
 
                                 {/* Task Thread */}
-                                {((task.messages && task.messages.length > 0) || (task.conversationId && pendingApprovals.some(a => a.conversationId === task.conversationId))) && (
+                                {task.messages && task.messages.length > 0 && (
                                   <div style={{ marginTop: '16px', marginBottom: '20px' }}>
                                     <p className="text-[12px] font-medium text-text-tertiary uppercase tracking-wider" style={{ marginBottom: '12px' }}>Activity</p>
                                     <div className="flex flex-col" style={{ gap: '8px' }}>
-                                      {task.messages.filter(msg => msg.content !== '...').map((msg) => (
+                                      {task.messages.map((msg) => (
                                         <div key={msg.id} className={`rounded-lg ${
                                           msg.role === 'tool' ? 'bg-white/[0.02]' : msg.role === 'user' ? 'bg-flame-500/[0.06] border border-flame-500/15' : 'bg-bg-tertiary border border-border-default'
                                         }`} style={{ padding: '10px 14px' }}>
@@ -606,31 +612,25 @@ export function TasksPage() {
                                           <p className={`text-[13px] ${msg.role === 'tool' ? 'text-text-tertiary' : 'text-text-primary'} whitespace-pre-wrap`}>{msg.content}</p>
                                         </div>
                                       ))}
-                                      {/* Working indicator with stop button */}
-                                      {((isReplying && expandedTaskId === task.id) || (task.status === 'in_progress' && task.messages.length > 0 && task.messages[task.messages.length - 1]?.content === '...')) && (
+                                      {/* Thinking indicator while agent is working */}
+                                      {isReplying && expandedTaskId === task.id && (
                                         <div className="rounded-lg bg-bg-tertiary border border-border-default" style={{ padding: '10px 14px' }}>
-                                          <AgentWorkingIndicator
-                                            agentName={employees.find(e => e.id === task.toEmployeeId)?.name}
-                                            onStop={task.conversationId ? () => stopMessage(task.conversationId!) : undefined}
-                                            size="sm"
-                                          />
+                                          <div className="flex items-center" style={{ gap: '6px', marginBottom: '4px' }}>
+                                            <Bot className="w-3 h-3 text-sky-400" />
+                                            <span className="text-[11px] text-text-tertiary">
+                                              {employees.find(e => e.id === task.toEmployeeId)?.name || 'Agent'}
+                                            </span>
+                                          </div>
+                                          <div className="flex items-center" style={{ gap: '6px' }}>
+                                            <div className="flex" style={{ gap: '4px' }}>
+                                              <span className="w-1.5 h-1.5 rounded-full bg-text-tertiary" style={{ animation: 'pulse-dot 1.4s ease-in-out infinite', animationDelay: '0s' }} />
+                                              <span className="w-1.5 h-1.5 rounded-full bg-text-tertiary" style={{ animation: 'pulse-dot 1.4s ease-in-out infinite', animationDelay: '0.2s' }} />
+                                              <span className="w-1.5 h-1.5 rounded-full bg-text-tertiary" style={{ animation: 'pulse-dot 1.4s ease-in-out infinite', animationDelay: '0.4s' }} />
+                                            </div>
+                                            <span className="text-[12px] text-text-tertiary">Working...</span>
+                                          </div>
                                         </div>
                                       )}
-                                      {/* Pending tool approvals for this task */}
-                                      {task.conversationId && pendingApprovals
-                                        .filter(a => a.conversationId === task.conversationId)
-                                        .map(approval => (
-                                          <ToolApprovalCard
-                                            key={approval.approvalId}
-                                            approvalId={approval.approvalId}
-                                            tool={approval.tool}
-                                            args={approval.args}
-                                            summary={approval.summary}
-                                            status={approval.status}
-                                            onRespond={respondToApproval}
-                                          />
-                                        ))
-                                      }
                                     </div>
                                   </div>
                                 )}
@@ -646,30 +646,28 @@ export function TasksPage() {
                                   </div>
                                 )}
 
-                                {/* Reply input (or stop button if agent is working) */}
-                                {(task.status === 'in_progress' || task.status === 'escalated') && (() => {
-                                  const isAgentWorking = isReplying || (task.status === 'in_progress' && task.messages.length > 0 && task.messages[task.messages.length - 1]?.content === '...')
-                                  return (
+                                {/* Reply input */}
+                                {(task.status === 'in_progress' || task.status === 'escalated') && (
                                   <div style={{ marginBottom: '20px' }}>
-                                    <div className="flex" style={{ gap: '8px' }}>
-                                      <input
-                                        value={expandedTaskId === task.id ? replyText : ''}
-                                        onChange={(e) => setReplyText(e.target.value)}
-                                        onKeyDown={(e) => e.key === 'Enter' && !isAgentWorking && handleReply(task.id)}
-                                        placeholder={isAgentWorking ? 'Agent is working...' : 'Reply to this task...'}
-                                        className="flex-1 rounded-lg bg-bg-tertiary border border-border-default text-[13px] text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-flame-500/30"
-                                        style={{ padding: '10px 14px' }}
-                                        disabled={isAgentWorking}
-                                      />
-                                      {isAgentWorking && task.conversationId ? (
-                                        <Button size="sm" variant="secondary" onClick={() => stopMessage(task.conversationId!)}>
-                                          <Square className="w-3 h-3" />
-                                          Stop
-                                        </Button>
+                                    <div className="flex items-end" style={{ gap: '10px' }}>
+                                      <div className="flex-1">
+                                        <ChatTextarea
+                                          value={expandedTaskId === task.id ? replyText : ''}
+                                          onChange={(e) => setReplyText(e.target.value)}
+                                          onKeyDown={(e) => {
+                                            if (e.key === 'Enter' && !e.shiftKey) {
+                                              e.preventDefault()
+                                              handleReply(task.id)
+                                            }
+                                          }}
+                                          placeholder={isReplying ? 'Agent is working...' : 'Reply to this task...'}
+                                          disabled={isReplying}
+                                        />
+                                      </div>
+                                      {isReplying ? (
+                                        <StopButton onClick={() => {/* TODO: wire up stop */}} />
                                       ) : (
-                                        <Button size="sm" onClick={() => handleReply(task.id)} disabled={!replyText.trim() || isAgentWorking}>
-                                          Send
-                                        </Button>
+                                        <SendButton onClick={() => handleReply(task.id)} disabled={!replyText.trim()} />
                                       )}
                                     </div>
                                     {replyError && expandedTaskId === task.id && (
@@ -678,8 +676,7 @@ export function TasksPage() {
                                       </div>
                                     )}
                                   </div>
-                                  )
-                                })()}
+                                )}
 
                                 {/* Actions */}
                                 <div className="flex items-center justify-between">

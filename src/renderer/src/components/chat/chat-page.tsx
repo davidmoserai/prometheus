@@ -1,11 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Send, Square, Plus, MessageSquare, ChevronLeft, ChevronDown, Users, ArrowRight, Trash2, Minimize2, FileText, Download, Paperclip, X, Brain, Terminal, Search, Globe, Edit3, Code } from 'lucide-react'
+import { Plus, MessageSquare, ChevronLeft, ChevronDown, Users, ArrowRight, Trash2, Minimize2, FileText, Download, Paperclip, X, Brain, Terminal, Search, Globe, Edit3, Code, ShieldAlert, Check, XIcon } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Button } from '@/components/ui/button'
+import { ChatTextarea, SendButton, StopButton } from '@/components/ui/chat-input'
 import { Badge } from '@/components/ui/badge'
-import { ToolApprovalCard } from '@/components/ui/tool-approval-card'
-import { AgentWorkingIndicator } from '@/components/ui/agent-working-indicator'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useAppStore, type Conversation, type ChatMessage, type ChatAttachment, type StreamPart } from '@/stores/app-store'
 
@@ -418,17 +417,49 @@ export function ChatPage() {
 
             {/* Messages */}
             <div ref={messagesContainerRef} onScroll={handleMessagesScroll} className="flex-1 overflow-y-auto flex flex-col" style={{ paddingLeft: '32px', paddingRight: '32px', paddingTop: '24px', paddingBottom: '24px', gap: '20px' }}>
-              {activeConversation.messages.map((msg) => (
-                <MessageBubble
-                  key={msg.id}
-                  message={msg}
-                  employeeName={selectedEmployee?.name}
-                  employeeAvatar={selectedEmployee?.avatar}
-                  expandedToolCalls={expandedToolCalls}
-                  toggleToolCallExpanded={toggleToolCallExpanded}
-                  getToolIcon={getToolIcon}
-                />
-              ))}
+              {(() => {
+                // When not streaming, render leftover tool call parts BEFORE the last assistant message
+                const msgs = activeConversation.messages
+                const leftoverParts = (!isSending && currentParts) ? currentParts.filter(p => p.type !== 'text') : []
+                const lastAssistantIdx = leftoverParts.length > 0
+                  ? msgs.map((m, i) => ({ m, i })).filter(x => x.m.role === 'assistant').pop()?.i ?? -1
+                  : -1
+
+                return msgs.map((msg, i) => (
+                  <div key={msg.id}>
+                    {i === lastAssistantIdx && leftoverParts.length > 0 && (
+                      <div className="flex animate-fade-in" style={{ gap: '14px', marginBottom: '20px' }}>
+                        <div className="w-8 shrink-0" />
+                        <div className="flex-1 max-w-2xl flex flex-col" style={{ gap: '6px' }}>
+                          {leftoverParts.map((part, pi) => {
+                            if (part.type === 'tool_call') {
+                              const isExpanded = expandedToolCalls.has(part.id)
+                              return (
+                                <div
+                                  key={part.id}
+                                  className="rounded-xl bg-white/[0.03] border-l-2 border-border-default overflow-hidden"
+                                  style={{ padding: '8px 12px', borderColor: 'var(--color-flame-500)' }}
+                                >
+                                  <button onClick={() => toggleToolCallExpanded(part.id)} className="flex items-center w-full text-left cursor-pointer" style={{ gap: '6px' }}>
+                                    <Terminal className="w-3 h-3 text-text-tertiary shrink-0" />
+                                    <span className="text-[11px] text-text-tertiary flex-1 truncate">{part.summary || part.tool}</span>
+                                    <ChevronDown className={`w-3 h-3 text-text-tertiary transition-transform ${isExpanded ? '' : '-rotate-90'}`} />
+                                  </button>
+                                  {isExpanded && part.detail && (
+                                    <pre className="text-[10px] text-text-tertiary font-mono whitespace-pre-wrap overflow-x-auto" style={{ marginTop: '6px' }}>{part.detail}</pre>
+                                  )}
+                                </div>
+                              )
+                            }
+                            return null
+                          })}
+                        </div>
+                      </div>
+                    )}
+                    <MessageBubble message={msg} employeeName={selectedEmployee?.name} employeeAvatar={selectedEmployee?.avatar} />
+                  </div>
+                ))
+              })()}
               {/* Unified streaming turn — only shown during active streaming */}
               {isSending && (hasStreamingContent || !hasStreamingText) && (
                 <div className="flex animate-fade-in" style={{ gap: '14px' }}>
@@ -474,16 +505,65 @@ export function ChatPage() {
                         )
                       }
                       if (part.type === 'tool_approval') {
+                        const isExpanded = expandedToolCalls.has(part.approvalId)
+                        const argsStr = JSON.stringify(part.args, null, 2)
                         return (
-                          <ToolApprovalCard
+                          <div
                             key={part.approvalId}
-                            approvalId={part.approvalId}
-                            tool={part.tool}
-                            args={part.args}
-                            summary={part.summary}
-                            status={part.status}
-                            onRespond={respondToApproval}
-                          />
+                            className={`rounded-xl overflow-hidden border-l-2 ${
+                              part.status === 'pending'
+                                ? 'bg-amber-500/[0.06] border-amber-500/50'
+                                : part.status === 'approved'
+                                  ? 'bg-emerald-500/[0.04] border-emerald-500/40'
+                                  : 'bg-red-500/[0.04] border-red-500/40'
+                            }`}
+                          >
+                            <div className="flex items-center" style={{ gap: '8px', padding: '8px 12px' }}>
+                              <ShieldAlert className={`w-4 h-4 shrink-0 ${
+                                part.status === 'pending' ? 'text-amber-400' : part.status === 'approved' ? 'text-emerald-400' : 'text-red-400'
+                              }`} />
+                              <div className="flex-1 min-w-0">
+                                <p className="text-[12px] text-text-primary truncate">{part.summary}</p>
+                              </div>
+                              {part.status === 'pending' ? (
+                                <div className="flex items-center shrink-0" style={{ gap: '6px' }}>
+                                  <button
+                                    onClick={() => respondToApproval(part.approvalId, false)}
+                                    className="flex items-center text-[11px] text-red-400 hover:text-red-300 transition-colors cursor-pointer rounded-lg hover:bg-red-500/10"
+                                    style={{ gap: '4px', padding: '4px 10px' }}
+                                  >
+                                    <XIcon className="w-3 h-3" />
+                                    Deny
+                                  </button>
+                                  <button
+                                    onClick={() => respondToApproval(part.approvalId, true)}
+                                    className="flex items-center text-[11px] text-emerald-400 hover:text-emerald-300 transition-colors cursor-pointer rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20"
+                                    style={{ gap: '4px', padding: '4px 10px' }}
+                                  >
+                                    <Check className="w-3 h-3" />
+                                    Approve
+                                  </button>
+                                </div>
+                              ) : (
+                                <Badge variant={part.status === 'approved' ? 'success' : 'destructive'}>
+                                  {part.status === 'approved' ? 'Approved' : 'Denied'}
+                                </Badge>
+                              )}
+                              {argsStr.length > 4 && (
+                                <button
+                                  onClick={() => toggleToolCallExpanded(part.approvalId)}
+                                  className="text-text-tertiary hover:text-text-secondary transition-colors cursor-pointer shrink-0"
+                                >
+                                  <ChevronDown className={`w-3 h-3 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} />
+                                </button>
+                              )}
+                            </div>
+                            {isExpanded && argsStr.length > 4 && (
+                              <div className="border-t border-white/[0.06]" style={{ padding: '8px 12px' }}>
+                                <pre className="text-[11px] text-text-secondary whitespace-pre-wrap font-mono leading-relaxed">{argsStr}</pre>
+                              </div>
+                            )}
+                          </div>
                         )
                       }
                       if (part.type === 'file_written') {
@@ -535,10 +615,16 @@ export function ChatPage() {
                       }
                       return null
                     })}
-                    {/* Thinking indicator — shown when agent is working but no text yet */}
+                    {/* Inline thinking dots — shown when agent is working but no text yet */}
                     {isSending && !hasStreamingText && (
                       <div className="rounded-2xl rounded-tl-lg bg-bg-elevated border border-border-default" style={{ padding: '12px 16px' }}>
-                        <AgentWorkingIndicator />
+                        <div className="flex items-center" style={{ gap: '6px' }}>
+                          <div className="flex" style={{ gap: '4px' }}>
+                            <span className="w-2 h-2 rounded-full bg-text-tertiary" style={{ animation: 'pulse-dot 1.4s ease-in-out infinite', animationDelay: '0s' }} />
+                            <span className="w-2 h-2 rounded-full bg-text-tertiary" style={{ animation: 'pulse-dot 1.4s ease-in-out infinite', animationDelay: '0.2s' }} />
+                            <span className="w-2 h-2 rounded-full bg-text-tertiary" style={{ animation: 'pulse-dot 1.4s ease-in-out infinite', animationDelay: '0.4s' }} />
+                          </div>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -597,34 +683,21 @@ export function ChatPage() {
                   <Paperclip className="w-4 h-4" />
                 </button>
                 <div className="flex-1 relative">
-                  <textarea
+                  <ChatTextarea
                     ref={inputRef}
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={handleKeyDown}
                     placeholder={`Message ${selectedEmployee?.name}...`}
-                    rows={1}
-                    className="flex w-full rounded-2xl border border-border-default bg-bg-tertiary text-[14px] text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-flame-500/25 focus:border-flame-500/40 transition-all duration-300 resize-none leading-relaxed"
-                    style={{ minHeight: '48px', maxHeight: '120px', padding: '14px 48px 14px 20px' }}
                   />
                 </div>
                 {isSending ? (
-                  <button
-                    onClick={handleStop}
-                    className="shrink-0 h-[48px] w-[48px] rounded-2xl flex items-center justify-center bg-bg-elevated border border-border-default hover:border-flame-500/50 hover:bg-flame-500/10 transition-all cursor-pointer"
-                    title="Stop generating"
-                  >
-                    <Square className="w-4 h-4 text-flame-400 fill-flame-400" />
-                  </button>
+                  <StopButton onClick={handleStop} />
                 ) : (
-                  <Button
-                    size="icon"
+                  <SendButton
                     onClick={handleSend}
                     disabled={!input.trim() && stagedAttachments.length === 0}
-                    className="shrink-0 h-[48px] w-[48px] rounded-2xl"
-                  >
-                    <Send className="w-4 h-4" />
-                  </Button>
+                  />
                 )}
               </div>
             </div>
@@ -679,17 +752,11 @@ export function ChatPage() {
 function MessageBubble({
   message,
   employeeName,
-  employeeAvatar,
-  expandedToolCalls,
-  toggleToolCallExpanded,
-  getToolIcon
+  employeeAvatar
 }: {
   message: ChatMessage
   employeeName?: string
   employeeAvatar?: string
-  expandedToolCalls: Set<string>
-  toggleToolCallExpanded: (id: string) => void
-  getToolIcon: (tool: string) => React.ReactNode
 }) {
   const isUser = message.role === 'user'
 
@@ -723,38 +790,6 @@ function MessageBubble({
         <div className="max-w-2xl">
           {!isUser && (
             <p className="text-[11px] text-text-tertiary font-medium" style={{ marginBottom: '6px' }}>{employeeName}</p>
-          )}
-          {/* Persisted tool calls rendered above the message content */}
-          {message.role === 'assistant' && message.toolCalls && message.toolCalls.length > 0 && (
-            <div className="flex flex-col" style={{ gap: '6px', marginBottom: '8px' }}>
-              {message.toolCalls.map((tc) => {
-                const isExpanded = expandedToolCalls.has(tc.id)
-                return (
-                  <div
-                    key={tc.id}
-                    className="rounded-xl bg-white/[0.03] border-l-2 overflow-hidden"
-                    style={{ borderLeftColor: 'rgba(249,115,22,0.4)' }}
-                  >
-                    <button
-                      className="flex items-center w-full cursor-pointer text-left transition-colors hover:bg-white/[0.02]"
-                      style={{ gap: '8px', padding: '6px 12px' }}
-                      onClick={() => tc.detail && toggleToolCallExpanded(tc.id)}
-                    >
-                      {getToolIcon(tc.tool)}
-                      <span className="text-[12px] text-text-tertiary flex-1 truncate">{tc.summary}</span>
-                      {tc.detail && (
-                        <ChevronDown className={`w-3 h-3 text-text-tertiary transition-transform duration-200 shrink-0 ${isExpanded ? 'rotate-180' : ''}`} />
-                      )}
-                    </button>
-                    {isExpanded && tc.detail && (
-                      <div className="border-t border-white/[0.06]" style={{ padding: '8px 12px' }}>
-                        <pre className="text-[11px] text-text-secondary whitespace-pre-wrap font-mono leading-relaxed">{tc.detail}</pre>
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
           )}
           <div className={`rounded-2xl transition-all duration-300 ${
             isUser
