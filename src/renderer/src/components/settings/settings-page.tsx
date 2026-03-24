@@ -625,10 +625,10 @@ export function SettingsPage() {
               {nativeIntegrations.map((integration) => (
                 <div
                   key={integration.id}
-                  className={`flex items-center justify-between rounded-2xl border transition-all duration-300 ${
+                  className={`flex items-center justify-between rounded-2xl border transition-all duration-300 bg-bg-secondary ${
                     integration.enabled
-                      ? 'bg-bg-elevated border-border-default'
-                      : 'bg-bg-secondary border-border-subtle'
+                      ? 'border-border-default'
+                      : 'border-border-subtle opacity-60'
                   }`}
                   style={{ padding: '20px 24px' }}
                 >

@@ -776,8 +776,26 @@ export class AgentManager {
     // back to our main process Memory instance and EmployeeStore.
     // Mastra agents never reach this code — they use native createTool() functions instead.
     const mem = getMemory()
+    const contactable = this.getContactableEmployees(employee)
+    const contactableIds = contactable.map(e => e.id)
     const internalServer = mem
-      ? await startInternalServer({ memory: mem, store: this.store })
+      ? await startInternalServer({
+          memory: mem,
+          store: this.store,
+          delegation: {
+            handleDelegateTask: (fromId, args, convId) => {
+              const fromEmp = this.store.getEmployee(fromId)
+              if (!fromEmp) throw new Error('Employee not found')
+              return this.handleDelegateTask(fromEmp, args, convId)
+            },
+            executeAgentMessage: (fromId, toId, msg) => {
+              const fromEmp = this.store.getEmployee(fromId)
+              if (!fromEmp) throw new Error('Employee not found')
+              return this.executeAgentMessage(fromEmp, toId, msg)
+            },
+            getContactableEmployeeIds: () => contactableIds
+          }
+        })
       : null
 
     // Start approval HTTP server if any tools need per-invocation approval
@@ -821,6 +839,12 @@ export class AgentManager {
       } else if (id === COMPOSIO_MCP_SERVER_ID && composioMcpConfig) {
         // Composio is ephemeral (not in settings) — use in-memory config
         mcpServers.push({ id, url: composioMcpConfig.url, headers: composioMcpConfig.headers })
+      } else {
+        // Check native integrations (not in mcpServers, resolved at runtime)
+        const nativeConfig = this.mcpManager?.getRegisteredConfig(id)
+        if (nativeConfig) {
+          mcpServers.push({ id: nativeConfig.id, command: nativeConfig.command, args: nativeConfig.args, env: nativeConfig.env })
+        }
       }
     }
 
@@ -865,6 +889,7 @@ export class AgentManager {
         internalServerPort: internalServer?.port,
         internalEmployeeId: employee.id,
         internalConversationId: conversationId,
+        hasDelegationTools: contactable.length > 0,
         onStream,
         onToolCall: filteredOnToolCall,
         onFileWritten

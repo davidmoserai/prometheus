@@ -225,6 +225,7 @@ export interface RunOptions {
   internalServerPort?: number
   internalEmployeeId?: string
   internalConversationId?: string
+  hasDelegationTools?: boolean
   onStream: (text: string) => void
   onToolCall?: (data: { tool: string; summary: string; detail?: string }) => void
   onFileWritten?: (data: { path: string; content: string }) => void
@@ -277,6 +278,16 @@ const TOOLS = [
     name: 'update_knowledge_doc',
     description: 'Update an existing knowledge document by its ID.',
     inputSchema: { type: 'object', properties: { doc_id: { type: 'string', description: 'ID of the document to update.' }, content: { type: 'string', description: 'New content.' } }, required: ['doc_id', 'content'] }
+  },
+  {
+    name: 'delegate_task',
+    description: 'Delegate a task to another employee. Use this when work should be handled by a team member with the right expertise. ALWAYS use this tool for task delegation — never just describe what you would delegate.',
+    inputSchema: { type: 'object', properties: { to_employee_id: { type: 'string', description: 'ID of the employee to delegate to' }, priority: { type: 'string', enum: ['high', 'medium', 'low'] }, deadline: { type: 'string', description: 'When the task should be completed' }, objective: { type: 'string', description: 'One sentence: what outcome is required' }, context: { type: 'string', description: 'Minimum context the agent needs' }, deliverable: { type: 'string', description: 'Exact output format expected' }, acceptance_criteria: { type: 'string', description: 'What makes this done correctly' }, escalate_if: { type: 'string', description: "Condition requiring founder's input" } }, required: ['to_employee_id', 'priority', 'objective', 'context', 'deliverable', 'acceptance_criteria', 'escalate_if'] }
+  },
+  {
+    name: 'message_employee',
+    description: 'Send a message to another employee and get their response. Use for quick questions, clarifications, or lightweight collaboration — not for formal task assignments.',
+    inputSchema: { type: 'object', properties: { to_employee_id: { type: 'string', description: 'ID of the employee to message' }, message: { type: 'string', description: 'Your message to them' } }, required: ['to_employee_id', 'message'] }
   }
 ]
 
@@ -284,7 +295,9 @@ const URL_MAP = {
   update_working_memory: '/memory/update',
   search_memory: '/memory/search',
   create_knowledge_doc: '/knowledge/create',
-  update_knowledge_doc: '/knowledge/update'
+  update_knowledge_doc: '/knowledge/update',
+  delegate_task: '/task/delegate',
+  message_employee: '/employee/message'
 }
 
 function post(path, body) {
@@ -423,7 +436,11 @@ export function runClaudeCode(options: RunOptions): { promise: Promise<string>; 
       'mcp__prometheus-internal__update_working_memory',
       'mcp__prometheus-internal__search_memory',
       'mcp__prometheus-internal__create_knowledge_doc',
-      'mcp__prometheus-internal__update_knowledge_doc'
+      'mcp__prometheus-internal__update_knowledge_doc',
+      ...(options.hasDelegationTools ? [
+        'mcp__prometheus-internal__delegate_task',
+        'mcp__prometheus-internal__message_employee'
+      ] : [])
     ] : []
 
     const ccTools = [
