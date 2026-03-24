@@ -33,3 +33,4 @@ release/
 
 # TypeScript
 *.tsbuildinfo
+.claude/worktrees/
