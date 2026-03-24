@@ -6,7 +6,7 @@ import { Agent } from '@mastra/core/agent'
 import { createTool } from '@mastra/core/tools'
 import { z } from 'zod'
 import { EmployeeStore } from './store'
-import { ChatAttachment, ChatMessage, Employee, ProviderConfig, Task, TaskMessage, TOOL_IDS } from './types'
+import { ChatAttachment, ChatMessage, Employee, ProviderConfig, Task, TaskMessage, ToolCallRecord, TOOL_IDS } from './types'
 import type { MCPManager } from './mcp-manager'
 import type { ConversationService } from './conversation-service'
 import { runClaudeCode, TOOL_MAP } from './claude-code-runner'
@@ -98,6 +98,24 @@ function buildProviderOptions(provider: ProviderConfig, hasTools: boolean): Reco
 // Tool builders — created dynamically per request via closure
 // ============================================================
 
+// Format a task's status for display in check_task_status results
+function formatTaskStatus(task: Task, store: EmployeeStore): string {
+  const toEmp = store.getEmployee(task.toEmployeeId)
+  const toName = toEmp?.name || 'Unknown'
+  let result = `**Task ${task.id}** — ${task.status.toUpperCase()}\nAssigned to: ${toName}\nObjective: ${task.objective}\nPriority: ${task.priority}\nDeadline: ${task.deadline || 'Not specified'}`
+  if (task.response) {
+    result += `\n\nResponse:\n${task.response.slice(0, 1000)}${task.response.length > 1000 ? '...' : ''}`
+  }
+  const recentMessages = task.messages.slice(-5)
+  if (recentMessages.length > 0) {
+    result += '\n\nRecent activity:'
+    for (const m of recentMessages) {
+      result += `\n- [${m.role}]: ${m.content.slice(0, 200)}`
+    }
+  }
+  return result
+}
+
 function buildMastraTools(
   store: EmployeeStore,
   employee: Employee,
@@ -151,7 +169,8 @@ function buildMastraTools(
       description: 'Send a message to another employee and get their response. Use this for quick questions, clarifications, or lightweight collaboration — not for formal task assignments.',
       inputSchema: z.object({
         to_employee_id: z.string().describe('ID of the employee to message'),
-        message: z.string().describe('Your message to them')
+        message: z.string().describe('Your message to them'),
+        task_id: z.string().optional().describe('If messaging about a specific task, include the task ID for context')
       }),
       execute: async (input) => {
         // Validate target employee is in the contactable list
@@ -161,11 +180,41 @@ function buildMastraTools(
         const toEmp = store.getEmployee(input.to_employee_id)
         onToolCall?.({ tool: 'message_employee', summary: `Messaged ${toEmp?.name || 'employee'}: ${input.message.slice(0, 80)}` })
         try {
-          const response = await onMessageEmployee?.(employee, input.to_employee_id, input.message)
+          // Prepend task context if task_id is provided
+          let fullMessage = input.message
+          if (input.task_id) {
+            const task = store.getTask(input.task_id)
+            if (task) {
+              fullMessage = `[Re: Task "${task.objective}" (${task.status})]\n\n${input.message}`
+            }
+          }
+          const response = await onMessageEmployee?.(employee, input.to_employee_id, fullMessage)
           return { result: response || 'No response received.' }
         } catch (err) {
           return { result: `Failed to message employee: ${err instanceof Error ? err.message : 'Unknown error'}` }
         }
+      }
+    })
+
+    // Check task status tool — lets agents query status of delegated tasks
+    tools.check_task_status = createTool({
+      id: 'check_task_status',
+      description: 'Check status of tasks you delegated. Returns status, response, and latest messages.',
+      inputSchema: z.object({
+        task_id: z.string().optional().describe('Specific task ID. If omitted, returns all your active delegated tasks.')
+      }),
+      execute: async (input) => {
+        const allTasks = store.listTasks().filter(t => t.fromEmployeeId === employee.id)
+        if (input.task_id) {
+          const task = allTasks.find(t => t.id === input.task_id)
+          if (!task) return { result: `Task "${input.task_id}" not found or you are not the delegator.` }
+          return { result: formatTaskStatus(task, store) }
+        }
+        // Return all active tasks (pending, in_progress, escalated)
+        const activeTasks = allTasks.filter(t => t.status !== 'completed')
+        if (activeTasks.length === 0) return { result: 'No active delegated tasks.' }
+        const formatted = activeTasks.map(t => formatTaskStatus(t, store)).join('\n\n---\n\n')
+        return { result: formatted }
       }
     })
   }
@@ -600,10 +649,14 @@ export class AgentManager {
       content: m.content
     }))
 
-    // Build tools via closure
+    // Build tools via closure, collecting tool calls for persistence
+    const collectedToolCalls: ToolCallRecord[] = []
     const contactable = this.getContactableEmployees(employee)
     const toolCallCb = this.onToolCall
-      ? (data: { tool: string; summary: string; detail?: string }) => this.onToolCall?.({ conversationId, ...data })
+      ? (data: { tool: string; summary: string; detail?: string }) => {
+          collectedToolCalls.push({ id: `tc-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, tool: data.tool, summary: data.summary, detail: data.detail })
+          this.onToolCall?.({ conversationId, ...data })
+        }
       : undefined
     const tools = buildMastraTools(
       this.store,
@@ -665,7 +718,11 @@ export class AgentManager {
         )
       }
 
-      const msg = await this.addMessage(conversationId, { role: 'assistant', content: responseText })
+      const msg = await this.addMessage(conversationId, {
+        role: 'assistant',
+        content: responseText,
+        ...(collectedToolCalls.length > 0 ? { toolCalls: collectedToolCalls } : {})
+      })
       onMessageStored?.(msg)
       return msg
     } catch (error) {
@@ -985,7 +1042,7 @@ export class AgentManager {
       if (updated) this.onTaskUpdate?.(updated)
     })
 
-    const message = `Task delegated to **${toName}** (${toEmployee?.role || 'unknown role'}). They're working on it now.\n\n**Objective:** ${args.objective}\n**Priority:** ${args.priority}\n**Deadline:** ${args.deadline || 'Not specified'}`
+    const message = `Task delegated to **${toName}** (task: ${task.id}). They're working on it now. Use check_task_status to monitor progress.\n\n**Objective:** ${args.objective}\n**Priority:** ${args.priority}\n**Deadline:** ${args.deadline || 'Not specified'}`
 
     return { task, message }
   }
@@ -1254,19 +1311,25 @@ export class AgentManager {
     const updated = this.store.getTask(task.id)
     if (updated) this.onTaskUpdate?.(updated)
 
-    // Notify the delegating agent's conversation with a system message about the result
+    // Inject task result into the delegating agent's conversation and auto-trigger processing
     if (originConversationId && this.convService) {
       try {
         const toName = toEmployee?.name || 'Unknown'
         const status = updated?.status || 'in_progress'
-        const summary = (updated?.response || '').slice(0, 500)
-        const feedbackContent = `[Task Update] Task "${task.objective}" ${status === 'escalated' ? 'was escalated' : 'completed'} by ${toName}.\n\nResponse summary: ${summary}${(updated?.response?.length || 0) > 500 ? '...' : ''}`
-        await this.convService.addMessage(originConversationId, {
-          role: 'system',
-          content: feedbackContent
+        const resultContent = `[Task Result from ${toName}] (task: ${task.id})\nTask: ${task.objective}\nStatus: ${status}\n\nResult:\n${updated?.response || '(no response)'}`
+
+        // Auto-trigger the delegating agent to process the result
+        this.sendMessage(
+          originConversationId,
+          resultContent,
+          () => {},
+          undefined,
+          true // skipApproval — automated callback
+        ).catch(err => {
+          console.error('Failed to auto-continue after task completion:', err)
         })
       } catch {
-        // Non-critical — don't fail the task if feedback message fails
+        // Non-critical — don't fail the task if feedback injection fails
       }
     }
   }

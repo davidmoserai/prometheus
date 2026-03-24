@@ -287,7 +287,12 @@ const TOOLS = [
   {
     name: 'message_employee',
     description: 'Send a message to another employee and get their response. Use for quick questions, clarifications, or lightweight collaboration — not for formal task assignments.',
-    inputSchema: { type: 'object', properties: { to_employee_id: { type: 'string', description: 'ID of the employee to message' }, message: { type: 'string', description: 'Your message to them' } }, required: ['to_employee_id', 'message'] }
+    inputSchema: { type: 'object', properties: { to_employee_id: { type: 'string', description: 'ID of the employee to message' }, message: { type: 'string', description: 'Your message to them' }, task_id: { type: 'string', description: 'If messaging about a specific task, include the task ID for context' } }, required: ['to_employee_id', 'message'] }
+  },
+  {
+    name: 'check_task_status',
+    description: 'Check status of tasks you delegated. Returns status, response, and latest messages.',
+    inputSchema: { type: 'object', properties: { task_id: { type: 'string', description: 'Specific task ID. If omitted, returns all your active delegated tasks.' } }, required: [] }
   }
 ]
 
@@ -297,7 +302,8 @@ const URL_MAP = {
   create_knowledge_doc: '/knowledge/create',
   update_knowledge_doc: '/knowledge/update',
   delegate_task: '/task/delegate',
-  message_employee: '/employee/message'
+  message_employee: '/employee/message',
+  check_task_status: '/task/status'
 }
 
 function post(path, body) {
@@ -439,7 +445,8 @@ export function runClaudeCode(options: RunOptions): { promise: Promise<string>; 
       'mcp__prometheus-internal__update_knowledge_doc',
       ...(options.hasDelegationTools ? [
         'mcp__prometheus-internal__delegate_task',
-        'mcp__prometheus-internal__message_employee'
+        'mcp__prometheus-internal__message_employee',
+        'mcp__prometheus-internal__check_task_status'
       ] : [])
     ] : []
 

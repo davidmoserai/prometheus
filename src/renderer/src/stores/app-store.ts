@@ -109,6 +109,13 @@ interface Conversation {
   updatedAt: string
 }
 
+interface ToolCallRecord {
+  id: string
+  tool: string
+  summary: string
+  detail?: string
+}
+
 interface ChatMessage {
   id: string
   role: 'user' | 'assistant' | 'system'
@@ -117,6 +124,7 @@ interface ChatMessage {
   handoffTo?: string
   handoffFrom?: string
   attachments?: ChatAttachment[]
+  toolCalls?: ToolCallRecord[]
 }
 
 interface TaskMessage {
@@ -790,4 +798,4 @@ export const useAppStore = create<AppState>((set, get) => ({
 
 }))
 
-export type { Company, Department, ContactAccess, Employee, KnowledgeDocument, Conversation, ChatMessage, ChatAttachment, Task, TaskMessage, RecurringTask, AppNotification, AppSettings, ProviderConfig, ToolAssignment, PermissionSet, MCPServerConfig }
+export type { Company, Department, ContactAccess, Employee, KnowledgeDocument, Conversation, ChatMessage, ChatAttachment, ToolCallRecord, Task, TaskMessage, RecurringTask, AppNotification, AppSettings, ProviderConfig, ToolAssignment, PermissionSet, MCPServerConfig }

@@ -416,49 +416,17 @@ export function ChatPage() {
 
             {/* Messages */}
             <div ref={messagesContainerRef} onScroll={handleMessagesScroll} className="flex-1 overflow-y-auto flex flex-col" style={{ paddingLeft: '32px', paddingRight: '32px', paddingTop: '24px', paddingBottom: '24px', gap: '20px' }}>
-              {(() => {
-                // When not streaming, render leftover tool call parts BEFORE the last assistant message
-                const msgs = activeConversation.messages
-                const leftoverParts = (!isSending && currentParts) ? currentParts.filter(p => p.type !== 'text') : []
-                const lastAssistantIdx = leftoverParts.length > 0
-                  ? msgs.map((m, i) => ({ m, i })).filter(x => x.m.role === 'assistant').pop()?.i ?? -1
-                  : -1
-
-                return msgs.map((msg, i) => (
-                  <div key={msg.id}>
-                    {i === lastAssistantIdx && leftoverParts.length > 0 && (
-                      <div className="flex animate-fade-in" style={{ gap: '14px', marginBottom: '20px' }}>
-                        <div className="w-8 shrink-0" />
-                        <div className="flex-1 max-w-2xl flex flex-col" style={{ gap: '6px' }}>
-                          {leftoverParts.map((part, pi) => {
-                            if (part.type === 'tool_call') {
-                              const isExpanded = expandedToolCalls.has(part.id)
-                              return (
-                                <div
-                                  key={part.id}
-                                  className="rounded-xl bg-white/[0.03] border-l-2 border-border-default overflow-hidden"
-                                  style={{ padding: '8px 12px', borderColor: 'var(--color-flame-500)' }}
-                                >
-                                  <button onClick={() => toggleToolCallExpanded(part.id)} className="flex items-center w-full text-left cursor-pointer" style={{ gap: '6px' }}>
-                                    <Terminal className="w-3 h-3 text-text-tertiary shrink-0" />
-                                    <span className="text-[11px] text-text-tertiary flex-1 truncate">{part.summary || part.tool}</span>
-                                    <ChevronDown className={`w-3 h-3 text-text-tertiary transition-transform ${isExpanded ? '' : '-rotate-90'}`} />
-                                  </button>
-                                  {isExpanded && part.detail && (
-                                    <pre className="text-[10px] text-text-tertiary font-mono whitespace-pre-wrap overflow-x-auto" style={{ marginTop: '6px' }}>{part.detail}</pre>
-                                  )}
-                                </div>
-                              )
-                            }
-                            return null
-                          })}
-                        </div>
-                      </div>
-                    )}
-                    <MessageBubble message={msg} employeeName={selectedEmployee?.name} employeeAvatar={selectedEmployee?.avatar} />
-                  </div>
-                ))
-              })()}
+              {activeConversation.messages.map((msg) => (
+                <MessageBubble
+                  key={msg.id}
+                  message={msg}
+                  employeeName={selectedEmployee?.name}
+                  employeeAvatar={selectedEmployee?.avatar}
+                  expandedToolCalls={expandedToolCalls}
+                  toggleToolCallExpanded={toggleToolCallExpanded}
+                  getToolIcon={getToolIcon}
+                />
+              ))}
               {/* Unified streaming turn — only shown during active streaming */}
               {isSending && (hasStreamingContent || !hasStreamingText) && (
                 <div className="flex animate-fade-in" style={{ gap: '14px' }}>
@@ -764,11 +732,17 @@ export function ChatPage() {
 function MessageBubble({
   message,
   employeeName,
-  employeeAvatar
+  employeeAvatar,
+  expandedToolCalls,
+  toggleToolCallExpanded,
+  getToolIcon
 }: {
   message: ChatMessage
   employeeName?: string
   employeeAvatar?: string
+  expandedToolCalls: Set<string>
+  toggleToolCallExpanded: (id: string) => void
+  getToolIcon: (tool: string) => React.ReactNode
 }) {
   const isUser = message.role === 'user'
 
@@ -802,6 +776,38 @@ function MessageBubble({
         <div className="max-w-2xl">
           {!isUser && (
             <p className="text-[11px] text-text-tertiary font-medium" style={{ marginBottom: '6px' }}>{employeeName}</p>
+          )}
+          {/* Persisted tool calls rendered above the message content */}
+          {message.role === 'assistant' && message.toolCalls && message.toolCalls.length > 0 && (
+            <div className="flex flex-col" style={{ gap: '6px', marginBottom: '8px' }}>
+              {message.toolCalls.map((tc) => {
+                const isExpanded = expandedToolCalls.has(tc.id)
+                return (
+                  <div
+                    key={tc.id}
+                    className="rounded-xl bg-white/[0.03] border-l-2 overflow-hidden"
+                    style={{ borderLeftColor: 'rgba(249,115,22,0.4)' }}
+                  >
+                    <button
+                      className="flex items-center w-full cursor-pointer text-left transition-colors hover:bg-white/[0.02]"
+                      style={{ gap: '8px', padding: '6px 12px' }}
+                      onClick={() => tc.detail && toggleToolCallExpanded(tc.id)}
+                    >
+                      {getToolIcon(tc.tool)}
+                      <span className="text-[12px] text-text-tertiary flex-1 truncate">{tc.summary}</span>
+                      {tc.detail && (
+                        <ChevronDown className={`w-3 h-3 text-text-tertiary transition-transform duration-200 shrink-0 ${isExpanded ? 'rotate-180' : ''}`} />
+                      )}
+                    </button>
+                    {isExpanded && tc.detail && (
+                      <div className="border-t border-white/[0.06]" style={{ padding: '8px 12px' }}>
+                        <pre className="text-[11px] text-text-secondary whitespace-pre-wrap font-mono leading-relaxed">{tc.detail}</pre>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
           )}
           <div className={`rounded-2xl transition-all duration-300 ${
             isUser

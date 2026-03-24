@@ -36,6 +36,22 @@ function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
   })
 }
 
+// Format a task for API response
+function formatTaskForResponse(task: { id: string; status: string; objective: string; priority: string; deadline: string; response?: string; messages: { role: string; content: string }[] }, toName: string): string {
+  let result = `**Task ${task.id}** — ${task.status.toUpperCase()}\nAssigned to: ${toName}\nObjective: ${task.objective}\nPriority: ${task.priority}\nDeadline: ${task.deadline || 'Not specified'}`
+  if (task.response) {
+    result += `\n\nResponse:\n${task.response.slice(0, 1000)}${task.response.length > 1000 ? '...' : ''}`
+  }
+  const recentMessages = task.messages.slice(-5)
+  if (recentMessages.length > 0) {
+    result += '\n\nRecent activity:'
+    for (const m of recentMessages) {
+      result += `\n- [${m.role}]: ${m.content.slice(0, 200)}`
+    }
+  }
+  return result
+}
+
 function respond(res: ServerResponse, status: number, body: unknown) {
   const json = JSON.stringify(body)
   res.writeHead(status, { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(json) })
@@ -131,14 +147,41 @@ export function startInternalServer(ctx: InternalServerContext): Promise<{ port:
           const result = ctx.delegation.handleDelegateTask(employeeId, args, conversationId)
           respond(res, 200, { result: result.message })
 
+        // ── Task Status ────────────────────────────────────────────────────────
+        } else if (req.url === '/task/status') {
+          const taskId = body.task_id as string | undefined
+          const allTasks = ctx.store.listTasks().filter(t => t.fromEmployeeId === employeeId)
+          if (taskId) {
+            const task = allTasks.find(t => t.id === taskId)
+            if (!task) { respond(res, 404, { result: `Task "${taskId}" not found or you are not the delegator.` }); return }
+            const toEmp = ctx.store.getEmployee(task.toEmployeeId)
+            respond(res, 200, { result: formatTaskForResponse(task, toEmp?.name || 'Unknown') })
+          } else {
+            const activeTasks = allTasks.filter(t => t.status !== 'completed')
+            if (activeTasks.length === 0) { respond(res, 200, { result: 'No active delegated tasks.' }); return }
+            const formatted = activeTasks.map(t => {
+              const toEmp = ctx.store.getEmployee(t.toEmployeeId)
+              return formatTaskForResponse(t, toEmp?.name || 'Unknown')
+            }).join('\n\n---\n\n')
+            respond(res, 200, { result: formatted })
+          }
+
         } else if (req.url === '/employee/message') {
           if (!ctx.delegation) { respond(res, 501, { error: 'Delegation not available' }); return }
           const toId = body.to_employee_id as string
-          const msg = body.message as string
+          let msg = body.message as string
+          const taskId = body.task_id as string | undefined
           const contactableIds = ctx.delegation.getContactableEmployeeIds(employeeId)
           if (!contactableIds.includes(toId)) {
             respond(res, 403, { result: "You don't have permission to contact that employee." })
             return
+          }
+          // Prepend task context if task_id is provided
+          if (taskId) {
+            const task = ctx.store.getTask(taskId)
+            if (task) {
+              msg = `[Re: Task "${task.objective}" (${task.status})]\n\n${msg}`
+            }
           }
           const response = await ctx.delegation.executeAgentMessage(employeeId, toId, msg)
           respond(res, 200, { result: response || 'No response received.' })

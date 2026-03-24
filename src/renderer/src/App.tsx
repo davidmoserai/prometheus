@@ -103,15 +103,20 @@ export default function App() {
               : c
           )
         }
-        // Remove text parts from streaming when assistant message is stored to prevent duplicates
-        // Keep tool_call, file_written, and tool_approval parts as they're not in the persisted message
+        // When assistant message has toolCalls, they're now persisted — clear all streaming parts
+        // Otherwise just remove text parts to prevent duplicates
         if (msg.role === 'assistant' && state.streamingParts[data.conversationId]) {
-          const nonTextParts = state.streamingParts[data.conversationId].filter(p => p.type !== 'text')
-          if (nonTextParts.length > 0) {
-            newState.streamingParts = { ...state.streamingParts, [data.conversationId]: nonTextParts }
-          } else {
+          if (msg.toolCalls && msg.toolCalls.length > 0) {
             const { [data.conversationId]: _, ...rest } = state.streamingParts
             newState.streamingParts = rest
+          } else {
+            const nonTextParts = state.streamingParts[data.conversationId].filter(p => p.type !== 'text')
+            if (nonTextParts.length > 0) {
+              newState.streamingParts = { ...state.streamingParts, [data.conversationId]: nonTextParts }
+            } else {
+              const { [data.conversationId]: _, ...rest } = state.streamingParts
+              newState.streamingParts = rest
+            }
           }
         }
         return newState
