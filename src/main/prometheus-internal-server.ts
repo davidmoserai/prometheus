@@ -14,9 +14,17 @@ import { createServer, IncomingMessage, ServerResponse } from 'http'
 import type { Memory } from '@mastra/memory'
 import type { EmployeeStore } from './store'
 
+// Forward declaration to avoid circular import
+interface DelegationHandler {
+  handleDelegateTask(fromEmployeeId: string, args: Record<string, string>, conversationId?: string): { task: unknown; message: string }
+  executeAgentMessage(fromEmployeeId: string, toEmployeeId: string, message: string): Promise<string>
+  getContactableEmployeeIds(employeeId: string): string[]
+}
+
 export interface InternalServerContext {
   memory: Memory
   store: EmployeeStore
+  delegation?: DelegationHandler
 }
 
 function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
@@ -98,6 +106,42 @@ export function startInternalServer(ctx: InternalServerContext): Promise<{ port:
           const updated = ctx.store.updateKnowledge(body.doc_id as string, { content: body.content as string })
           if (!updated) respond(res, 404, { result: `Document "${body.doc_id}" not found.` })
           else respond(res, 200, { result: `Document "${updated.title}" updated.` })
+
+        // ── Task Delegation ──────────────────────────────────────────────────────
+        } else if (req.url === '/task/delegate') {
+          if (!ctx.delegation) { respond(res, 501, { error: 'Delegation not available' }); return }
+          const toId = body.to_employee_id as string
+          const contactableIds = ctx.delegation.getContactableEmployeeIds(employeeId)
+          if (!contactableIds.includes(toId)) {
+            respond(res, 403, { result: "You don't have permission to contact that employee." })
+            return
+          }
+          const fromEmp = ctx.store.getEmployee(employeeId)
+          if (!fromEmp) { respond(res, 404, { result: 'Employee not found.' }); return }
+          const args: Record<string, string> = {
+            to_employee_id: toId,
+            priority: (body.priority as string) || 'medium',
+            deadline: (body.deadline as string) || '',
+            objective: (body.objective as string) || '',
+            context: (body.context as string) || '',
+            deliverable: (body.deliverable as string) || '',
+            acceptance_criteria: (body.acceptance_criteria as string) || '',
+            escalate_if: (body.escalate_if as string) || ''
+          }
+          const result = ctx.delegation.handleDelegateTask(employeeId, args, conversationId)
+          respond(res, 200, { result: result.message })
+
+        } else if (req.url === '/employee/message') {
+          if (!ctx.delegation) { respond(res, 501, { error: 'Delegation not available' }); return }
+          const toId = body.to_employee_id as string
+          const msg = body.message as string
+          const contactableIds = ctx.delegation.getContactableEmployeeIds(employeeId)
+          if (!contactableIds.includes(toId)) {
+            respond(res, 403, { result: "You don't have permission to contact that employee." })
+            return
+          }
+          const response = await ctx.delegation.executeAgentMessage(employeeId, toId, msg)
+          respond(res, 200, { result: response || 'No response received.' })
 
         } else {
           respond(res, 404, { error: 'Unknown endpoint' })
