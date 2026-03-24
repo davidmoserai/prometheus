@@ -129,7 +129,12 @@ const api = {
     update: (id: string, updates: unknown) => ipcRenderer.invoke('mcp:update', id, updates),
     remove: (id: string) => ipcRenderer.invoke('mcp:remove', id),
     getTools: (serverId: string) => ipcRenderer.invoke('mcp:getTools', serverId),
-    testConnection: (config: unknown) => ipcRenderer.invoke('mcp:testConnection', config)
+    testConnection: (config: unknown) => ipcRenderer.invoke('mcp:testConnection', config),
+    onStatusChange: (callback: (data: { serverId: string; status: string; error?: string }) => void) => {
+      const handler = (_event: unknown, data: { serverId: string; status: string; error?: string }) => callback(data)
+      ipcRenderer.on('mcp:statusChange', handler)
+      return () => ipcRenderer.removeListener('mcp:statusChange', handler)
+    }
   },
   composio: {
     hasApiKey: () => ipcRenderer.invoke('composio:hasApiKey'),

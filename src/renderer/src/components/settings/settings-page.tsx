@@ -68,7 +68,7 @@ const PROVIDER_INFO: Record<string, { description: string; signupUrl: string; co
 }
 
 export function SettingsPage() {
-  const { settings, updateSettings, mcpServers, mcpToolNames, loadMcpServers, addMcpServer, removeMcpServer, updateMcpServer } = useAppStore()
+  const { settings, updateSettings, mcpServers, mcpToolNames, loadMcpServers, addMcpServer, removeMcpServer, updateMcpServer, testMcpConnection } = useAppStore()
   const [providers, setProviders] = useState<ProviderConfig[]>(settings?.providers || [])
   const [defaultProvider, setDefaultProvider] = useState(settings?.defaultProvider || 'openai')
   const [defaultModel, setDefaultModel] = useState(settings?.defaultModel || 'gpt-4o')
@@ -110,13 +110,18 @@ export function SettingsPage() {
 
   // MCP form state
   const [showMcpForm, setShowMcpForm] = useState(false)
+  const [mcpFormMode, setMcpFormMode] = useState<'json' | 'manual'>('json')
   const [mcpName, setMcpName] = useState('')
   const [mcpCommand, setMcpCommand] = useState('')
   const [mcpArgs, setMcpArgs] = useState('')
   const [mcpEnv, setMcpEnv] = useState('')
   const [mcpGithubUrl, setMcpGithubUrl] = useState('')
+  const [mcpJsonInput, setMcpJsonInput] = useState('')
+  const [mcpParsedConfig, setMcpParsedConfig] = useState<{ name: string; command: string; args: string[]; env?: Record<string, string> } | null>(null)
+  const [mcpParseError, setMcpParseError] = useState<string | null>(null)
   const [mcpConnecting, setMcpConnecting] = useState(false)
   const [mcpError, setMcpError] = useState<string | null>(null)
+  const [mcpDiscoveredTools, setMcpDiscoveredTools] = useState<string[] | null>(null)
   const [showEnvValues, setShowEnvValues] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
@@ -142,47 +147,152 @@ export function SettingsPage() {
     setProviders(providers.map((p) => (p.id === id ? { ...p, ...updates } : p)))
   }
 
-  const handleAddMcpServer = async () => {
-    if (!mcpName.trim() || !mcpCommand.trim()) return
-    setMcpConnecting(true)
-    setMcpError(null)
+  // Parse Claude Desktop / single-server JSON config into a normalized config object
+  const parseClaudeDesktopConfig = (input: string): { name: string; command: string; args: string[]; env?: Record<string, string> } | null => {
+    try {
+      const parsed = JSON.parse(input)
 
-    // Parse args (comma-separated)
-    const args = mcpArgs.split(',').map(a => a.trim()).filter(Boolean)
+      // Format 1: Claude Desktop format — { "mcpServers": { "name": { "command": ... } } }
+      if (parsed.mcpServers && typeof parsed.mcpServers === 'object') {
+        const entries = Object.entries(parsed.mcpServers)
+        if (entries.length === 0) return null
+        const [name, serverConfig] = entries[0] as [string, { command?: string; args?: string[]; env?: Record<string, string> }]
+        if (!serverConfig?.command) return null
+        return { name, command: serverConfig.command, args: serverConfig.args || [], env: serverConfig.env }
+      }
 
-    // Parse env vars (KEY=VALUE per line)
-    const env: Record<string, string> = {}
-    if (mcpEnv.trim()) {
-      for (const line of mcpEnv.split('\n')) {
-        const eqIdx = line.indexOf('=')
-        if (eqIdx > 0) {
-          env[line.slice(0, eqIdx).trim()] = line.slice(eqIdx + 1).trim()
+      // Format 2: Single server object — { "command": "npx", "args": [...] }
+      if (parsed.command && typeof parsed.command === 'string') {
+        // Try to derive a name from args (the package name)
+        const args = parsed.args || []
+        const pkgName = args.find((a: string) => !a.startsWith('-')) || 'mcp-server'
+        const name = pkgName.replace(/^@[^/]+\//, '').replace(/^server-/, '')
+        return { name, command: parsed.command, args, env: parsed.env }
+      }
+
+      // Format 3: Named wrapper — { "name": { "command": "npx", "args": [...] } }
+      const entries = Object.entries(parsed)
+      if (entries.length === 1) {
+        const [name, serverConfig] = entries[0] as [string, { command?: string; args?: string[]; env?: Record<string, string> }]
+        if (serverConfig?.command && typeof serverConfig.command === 'string') {
+          return { name, command: serverConfig.command, args: serverConfig.args || [], env: serverConfig.env }
         }
       }
+
+      return null
+    } catch {
+      return null
+    }
+  }
+
+  // Auto-parse JSON input on change
+  const handleJsonInputChange = (value: string) => {
+    setMcpJsonInput(value)
+    setMcpParseError(null)
+    setMcpParsedConfig(null)
+    setMcpDiscoveredTools(null)
+    setMcpError(null)
+
+    if (!value.trim()) return
+
+    const config = parseClaudeDesktopConfig(value)
+    if (config) {
+      setMcpParsedConfig(config)
+      setMcpName(config.name)
+    } else {
+      setMcpParseError('Could not parse config. Supported formats: Claude Desktop JSON, single server object, or named wrapper.')
+    }
+  }
+
+  // Test-first flow: test connection, show tools, then save
+  const handleTestAndAddMcpServer = async () => {
+    setMcpConnecting(true)
+    setMcpError(null)
+    setMcpDiscoveredTools(null)
+
+    let configName: string
+    let configCommand: string
+    let configArgs: string[]
+    let configEnv: Record<string, string> | undefined
+    let configGithubUrl: string | undefined
+
+    if (mcpFormMode === 'json' && mcpParsedConfig) {
+      configName = mcpName.trim() || mcpParsedConfig.name
+      configCommand = mcpParsedConfig.command
+      configArgs = mcpParsedConfig.args
+      configEnv = mcpParsedConfig.env && Object.keys(mcpParsedConfig.env).length > 0 ? mcpParsedConfig.env : undefined
+      configGithubUrl = undefined
+    } else {
+      if (!mcpName.trim() || !mcpCommand.trim()) { setMcpConnecting(false); return }
+      configName = mcpName.trim()
+      configCommand = mcpCommand.trim()
+      configArgs = mcpArgs.split(',').map(a => a.trim()).filter(Boolean)
+      const env: Record<string, string> = {}
+      if (mcpEnv.trim()) {
+        for (const line of mcpEnv.split('\n')) {
+          const eqIdx = line.indexOf('=')
+          if (eqIdx > 0) {
+            env[line.slice(0, eqIdx).trim()] = line.slice(eqIdx + 1).trim()
+          }
+        }
+      }
+      configEnv = Object.keys(env).length > 0 ? env : undefined
+      configGithubUrl = mcpGithubUrl.trim() || undefined
+    }
+
+    // Generate unique ID (append suffix if duplicate exists)
+    let baseId = configName.toLowerCase().replace(/[^a-z0-9]+/g, '-')
+    let id = baseId
+    const existingIds = new Set(mcpServers.map(s => s.id))
+    let suffix = 2
+    while (existingIds.has(id)) {
+      id = `${baseId}-${suffix++}`
     }
 
     const config: MCPServerConfig = {
-      id: mcpName.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
-      name: mcpName.trim(),
-      command: mcpCommand.trim(),
-      args,
-      env: Object.keys(env).length > 0 ? env : undefined,
-      githubUrl: mcpGithubUrl.trim() || undefined,
+      id,
+      name: configName,
+      command: configCommand,
+      args: configArgs,
+      env: configEnv,
+      githubUrl: configGithubUrl,
       enabled: true
     }
 
+    // Test connection first — don't save broken configs
+    const testResult = await testMcpConnection(config)
+    if (!testResult.success) {
+      setMcpConnecting(false)
+      setMcpError(testResult.error || 'Connection test failed')
+      return
+    }
+
+    setMcpDiscoveredTools(testResult.tools || [])
+
+    // Test passed — now save
     const result = await addMcpServer(config)
     setMcpConnecting(false)
 
     if (result.success) {
-      setShowMcpForm(false)
-      setMcpName('')
-      setMcpCommand('')
-      setMcpArgs('')
-      setMcpEnv('')
+      resetMcpForm()
     } else {
-      setMcpError(result.error || 'Failed to connect')
+      setMcpError(result.error || 'Failed to save server')
     }
+  }
+
+  const resetMcpForm = () => {
+    setShowMcpForm(false)
+    setMcpFormMode('json')
+    setMcpName('')
+    setMcpCommand('')
+    setMcpArgs('')
+    setMcpEnv('')
+    setMcpGithubUrl('')
+    setMcpJsonInput('')
+    setMcpParsedConfig(null)
+    setMcpParseError(null)
+    setMcpError(null)
+    setMcpDiscoveredTools(null)
   }
 
   const handleRemoveMcpServer = async (id: string) => {
@@ -504,54 +614,158 @@ export function SettingsPage() {
             <Card style={{ marginBottom: '12px' }}>
               <CardHeader>
                 <CardTitle>New MCP Server</CardTitle>
-                <CardDescription>Configure a stdio-based MCP server connection</CardDescription>
+                <CardDescription>Paste a JSON config from any MCP server README, or configure manually</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="flex flex-col" style={{ gap: '16px' }}>
-                  <div>
-                    <label className="block text-[13px] font-medium text-text-secondary" style={{ marginBottom: '8px' }}>Name</label>
-                    <Input
-                      placeholder="e.g. GitHub, Slack, Filesystem..."
-                      value={mcpName}
-                      onChange={(e) => setMcpName(e.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[13px] font-medium text-text-secondary" style={{ marginBottom: '8px' }}>Command</label>
-                    <Input
-                      placeholder="e.g. npx"
-                      value={mcpCommand}
-                      onChange={(e) => setMcpCommand(e.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[13px] font-medium text-text-secondary" style={{ marginBottom: '8px' }}>Arguments (comma-separated)</label>
-                    <Input
-                      placeholder="e.g. -y, @modelcontextprotocol/server-github"
-                      value={mcpArgs}
-                      onChange={(e) => setMcpArgs(e.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[13px] font-medium text-text-secondary" style={{ marginBottom: '8px' }}>Environment Variables (one per line, KEY=VALUE)</label>
-                    <textarea
-                      placeholder={'GITHUB_TOKEN=ghp_...\nANOTHER_VAR=value'}
-                      value={mcpEnv}
-                      onChange={(e) => setMcpEnv(e.target.value)}
-                      rows={3}
-                      className="flex w-full rounded-xl border border-border-default bg-bg-tertiary text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-flame-500/25 font-mono"
-                      style={{ padding: '10px 16px', borderRadius: '12px', resize: 'vertical' }}
-                    />
+                  {/* Mode tabs */}
+                  <div className="flex rounded-xl border border-border-default overflow-hidden" style={{ height: '36px' }}>
+                    <button
+                      onClick={() => setMcpFormMode('json')}
+                      className={`flex-1 text-[13px] font-medium transition-colors cursor-pointer ${
+                        mcpFormMode === 'json'
+                          ? 'bg-bg-elevated text-text-primary'
+                          : 'bg-bg-tertiary text-text-tertiary hover:text-text-secondary'
+                      }`}
+                    >
+                      Paste JSON
+                    </button>
+                    <button
+                      onClick={() => setMcpFormMode('manual')}
+                      className={`flex-1 text-[13px] font-medium transition-colors border-l border-border-default cursor-pointer ${
+                        mcpFormMode === 'manual'
+                          ? 'bg-bg-elevated text-text-primary'
+                          : 'bg-bg-tertiary text-text-tertiary hover:text-text-secondary'
+                      }`}
+                    >
+                      Manual
+                    </button>
                   </div>
 
-                  <div>
-                    <label className="block text-[13px] font-medium text-text-secondary" style={{ marginBottom: '8px' }}>GitHub Repository (optional)</label>
-                    <Input
-                      placeholder="e.g. https://github.com/user/repo"
-                      value={mcpGithubUrl}
-                      onChange={(e) => setMcpGithubUrl(e.target.value)}
-                    />
-                  </div>
+                  {/* JSON mode */}
+                  {mcpFormMode === 'json' && (
+                    <>
+                      <div>
+                        <label className="block text-[13px] font-medium text-text-secondary" style={{ marginBottom: '8px' }}>Server Config (JSON)</label>
+                        <textarea
+                          placeholder={'{\n  "mcpServers": {\n    "server-name": {\n      "command": "npx",\n      "args": ["-y", "@modelcontextprotocol/server-github"],\n      "env": { "GITHUB_TOKEN": "ghp_..." }\n    }\n  }\n}'}
+                          value={mcpJsonInput}
+                          onChange={(e) => handleJsonInputChange(e.target.value)}
+                          rows={8}
+                          className="flex w-full rounded-xl border border-border-default bg-bg-tertiary text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-flame-500/25 font-mono"
+                          style={{ padding: '10px 16px', borderRadius: '12px', resize: 'vertical' }}
+                        />
+                      </div>
+
+                      {mcpParseError && (
+                        <div className="flex items-center rounded-xl bg-red-500/[0.06] border border-red-500/15" style={{ gap: '8px', padding: '12px 16px' }}>
+                          <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                          <p className="text-[12px] text-red-300">{mcpParseError}</p>
+                        </div>
+                      )}
+
+                      {/* Parsed config preview */}
+                      {mcpParsedConfig && (
+                        <div className="rounded-xl border border-border-default bg-bg-tertiary" style={{ padding: '16px' }}>
+                          <div className="flex items-center" style={{ gap: '8px', marginBottom: '12px' }}>
+                            <Check className="w-4 h-4 text-emerald-400" />
+                            <span className="text-[13px] font-medium text-emerald-300">Config parsed successfully</span>
+                          </div>
+                          <div className="flex flex-col" style={{ gap: '10px' }}>
+                            <div>
+                              <label className="block text-[12px] font-medium text-text-tertiary" style={{ marginBottom: '4px' }}>Name (editable)</label>
+                              <Input
+                                value={mcpName}
+                                onChange={(e) => setMcpName(e.target.value)}
+                                placeholder="Server name"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[12px] font-medium text-text-tertiary" style={{ marginBottom: '4px' }}>Command</label>
+                              <p className="text-[13px] text-text-secondary font-mono">{mcpParsedConfig.command} {mcpParsedConfig.args.join(' ')}</p>
+                            </div>
+                            {mcpParsedConfig.env && Object.keys(mcpParsedConfig.env).length > 0 && (
+                              <div>
+                                <label className="block text-[12px] font-medium text-text-tertiary" style={{ marginBottom: '4px' }}>Environment Variables</label>
+                                <div className="flex flex-wrap" style={{ gap: '6px' }}>
+                                  {Object.keys(mcpParsedConfig.env).map(key => (
+                                    <Badge key={key} variant="secondary">{key}</Badge>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  {/* Manual mode */}
+                  {mcpFormMode === 'manual' && (
+                    <>
+                      <div>
+                        <label className="block text-[13px] font-medium text-text-secondary" style={{ marginBottom: '8px' }}>Name</label>
+                        <Input
+                          placeholder="e.g. GitHub, Slack, Filesystem..."
+                          value={mcpName}
+                          onChange={(e) => setMcpName(e.target.value)}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[13px] font-medium text-text-secondary" style={{ marginBottom: '8px' }}>Command</label>
+                        <Input
+                          placeholder="e.g. npx"
+                          value={mcpCommand}
+                          onChange={(e) => setMcpCommand(e.target.value)}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[13px] font-medium text-text-secondary" style={{ marginBottom: '8px' }}>Arguments (comma-separated)</label>
+                        <Input
+                          placeholder="e.g. -y, @modelcontextprotocol/server-github"
+                          value={mcpArgs}
+                          onChange={(e) => setMcpArgs(e.target.value)}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[13px] font-medium text-text-secondary" style={{ marginBottom: '8px' }}>Environment Variables (one per line, KEY=VALUE)</label>
+                        <textarea
+                          placeholder={'GITHUB_TOKEN=ghp_...\nANOTHER_VAR=value'}
+                          value={mcpEnv}
+                          onChange={(e) => setMcpEnv(e.target.value)}
+                          rows={3}
+                          className="flex w-full rounded-xl border border-border-default bg-bg-tertiary text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-flame-500/25 font-mono"
+                          style={{ padding: '10px 16px', borderRadius: '12px', resize: 'vertical' }}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[13px] font-medium text-text-secondary" style={{ marginBottom: '8px' }}>GitHub Repository (optional)</label>
+                        <Input
+                          placeholder="e.g. https://github.com/user/repo"
+                          value={mcpGithubUrl}
+                          onChange={(e) => setMcpGithubUrl(e.target.value)}
+                        />
+                      </div>
+                    </>
+                  )}
+
+                  {/* Discovered tools (shown after successful test) */}
+                  {mcpDiscoveredTools && mcpDiscoveredTools.length > 0 && (
+                    <div className="flex items-start rounded-xl bg-emerald-500/[0.06] border border-emerald-500/15" style={{ gap: '8px', padding: '12px 16px' }}>
+                      <Check className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="text-[12px] text-emerald-300 font-medium">Connection successful — {mcpDiscoveredTools.length} tool{mcpDiscoveredTools.length !== 1 ? 's' : ''} discovered</p>
+                        <div className="flex flex-wrap" style={{ gap: '4px', marginTop: '6px' }}>
+                          {mcpDiscoveredTools.slice(0, 10).map(name => (
+                            <Badge key={name} variant="secondary">{name}</Badge>
+                          ))}
+                          {mcpDiscoveredTools.length > 10 && (
+                            <Badge variant="secondary">+{mcpDiscoveredTools.length - 10} more</Badge>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
                   {mcpError && (
                     <div className="flex items-center rounded-xl bg-red-500/[0.06] border border-red-500/15" style={{ gap: '8px', padding: '12px 16px' }}>
@@ -561,12 +775,19 @@ export function SettingsPage() {
                   )}
 
                   <div className="flex justify-end" style={{ gap: '8px' }}>
-                    <Button variant="ghost" size="sm" onClick={() => { setShowMcpForm(false); setMcpError(null) }}>
+                    <Button variant="ghost" size="sm" onClick={resetMcpForm}>
                       Cancel
                     </Button>
-                    <Button size="sm" onClick={handleAddMcpServer} disabled={mcpConnecting || !mcpName.trim() || !mcpCommand.trim()}>
-                      {mcpConnecting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
-                      {mcpConnecting ? 'Connecting...' : 'Add & Connect'}
+                    <Button
+                      size="sm"
+                      onClick={handleTestAndAddMcpServer}
+                      disabled={
+                        mcpConnecting ||
+                        (mcpFormMode === 'json' ? !mcpParsedConfig : (!mcpName.trim() || !mcpCommand.trim()))
+                      }
+                    >
+                      {mcpConnecting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Server className="w-3.5 h-3.5" />}
+                      {mcpConnecting ? 'Testing...' : 'Test & Add'}
                     </Button>
                   </div>
                 </div>

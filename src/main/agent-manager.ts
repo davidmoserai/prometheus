@@ -591,8 +591,8 @@ export class AgentManager {
       mem
     )
 
-    // Merge MCP tools that the employee has enabled
-    const allTools = this.mergeEmployeeMcpTools(employee, tools)
+    // Merge MCP tools that the employee has enabled (lazily connects MCP servers as needed)
+    const allTools = await this.mergeEmployeeMcpTools(employee, tools)
 
     // Wrap tools that require approval (unless autoApproveAll is set or this is an automated call)
     if (!skipApproval && !employee.permissions.autoApproveAll && this.onApprovalRequest) {
@@ -1425,11 +1425,12 @@ export class AgentManager {
   /**
    * Merge MCP tools that the employee has enabled into the builtin tools record.
    * Only includes MCP tools the employee explicitly has in their tools array with enabled=true.
+   * Lazily connects MCP servers as needed via ensureConnected.
    */
-  private mergeEmployeeMcpTools(
+  private async mergeEmployeeMcpTools(
     employee: Employee,
     builtinTools: Record<string, ReturnType<typeof createTool>>
-  ): Record<string, ReturnType<typeof createTool>> {
+  ): Promise<Record<string, ReturnType<typeof createTool>>> {
     if (!this.mcpManager) return builtinTools
 
     const allTools = { ...builtinTools }
@@ -1442,6 +1443,16 @@ export class AgentManager {
       const serverId = assignment.mcpServerId!
       if (!byServer.has(serverId)) byServer.set(serverId, [])
       byServer.get(serverId)!.push(assignment.id)
+    }
+
+    // Lazily connect needed servers in parallel
+    const connectResults = await Promise.allSettled(
+      Array.from(byServer.keys()).map(sid => this.mcpManager!.ensureConnected(sid))
+    )
+    for (const result of connectResults) {
+      if (result.status === 'rejected') {
+        console.error('Failed to connect MCP server:', result.reason)
+      }
     }
 
     // Merge tools from each MCP server

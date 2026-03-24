@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { ArrowLeft, Save, Sparkles, ArrowRight, Brain, Trash2, Plus, ChevronDown, ChevronRight } from 'lucide-react'
+import { ArrowLeft, Save, Sparkles, ArrowRight, Brain, Trash2, Plus, ChevronDown, ChevronRight, AlertTriangle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -782,6 +782,15 @@ export function EmployeeEditor({ employee, onClose }: EmployeeEditorProps) {
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
+                  {/* Tool count warning */}
+                  {tools.filter(t => t.enabled).length >= 30 && (
+                    <div className="flex items-start rounded-xl bg-amber-500/[0.06] border border-amber-500/15" style={{ gap: '10px', padding: '12px 16px', marginBottom: '16px' }}>
+                      <AlertTriangle className="w-4 h-4 text-amber-300 shrink-0 mt-0.5" />
+                      <p className="text-[12px] text-amber-300">
+                        <strong>{tools.filter(t => t.enabled).length} tools enabled.</strong> LLM tool selection accuracy may degrade — consider disabling unused tools.
+                      </p>
+                    </div>
+                  )}
                   <div className="flex flex-col" style={{ gap: '12px' }}>
                     {/* Built-in Tools Section */}
                     {(() => {

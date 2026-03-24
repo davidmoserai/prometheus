@@ -60,11 +60,15 @@ Tailwind spacing utilities (`p-7`, `mb-5`, `gap-6`, etc.) do NOT render at corre
 - **Storage**: `AppSettings.mcpServers: MCPServerConfig[]` — persisted in JSON store
 - **IPC channels**: `mcp:list`, `mcp:add`, `mcp:update`, `mcp:remove`, `mcp:getTools`, `mcp:testConnection`
 - **Tool namespacing**: MCP tools prefixed with `mcp_{serverId}_{toolName}` to avoid collisions with builtin tools
-- **Employee integration**: `ToolAssignment.mcpServerId` links MCP tools to their server; `mergeEmployeeMcpTools()` in agent-manager merges enabled MCP tools per employee
-- **Settings UI**: MCP Servers section in settings page — add/remove servers, view discovered tools, toggle enable/disable
-- **Employee editor**: Tools tab has expandable sections — "Built-in" section + one "MCP: {name}" section per connected server
-- **Lifecycle**: MCPManager connects to all enabled servers on app start, disconnects on app quit
-- **Mock API**: `mcp` namespace with stubs for web preview mode
+- **Employee integration**: `ToolAssignment.mcpServerId` links MCP tools to their server; `mergeEmployeeMcpTools()` (async) in agent-manager merges enabled MCP tools per employee
+- **Settings UI**: MCP Servers section with JSON paste import (default) and manual form tabs; test-before-save flow; add/remove servers, view discovered tools, toggle enable/disable
+- **Employee editor**: Tools tab has expandable sections — "Built-in" section + one "MCP: {name}" section per connected server; amber warning at 30+ enabled tools
+- **Lazy connection**: Servers register configs on app start but only connect on first use (`ensureConnected`); deduplicates concurrent connect calls
+- **Idle timeout**: 60s interval disconnects servers idle for 30+ minutes; health-checks connected servers via `listToolsets()` with 5s timeout
+- **Health checks**: Failed health checks disconnect the server and push `mcp:statusChange` events to the frontend (in-app notification)
+- **Shutdown**: `before-quit` uses `event.preventDefault()` + re-quit pattern with 5s timeout; `process.on('exit')` safety net force-kills child processes
+- **Composio stays eager**: HTTP transport, no child process, connects on app start as before
+- **Mock API**: `mcp` namespace with stubs for web preview mode (includes `onStatusChange`)
 
 ## Agent Memory System (Mastra Memory)
 - **Package**: `@mastra/memory` + `@mastra/libsql` — persistent memory with LibSQL storage
