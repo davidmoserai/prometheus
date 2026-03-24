@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync, mkdtempSync, unlinkSync } from 'fs'
 import { execSync } from 'child_process'
 import { join } from 'path'
-import { tmpdir } from 'os'
+import { homedir, tmpdir } from 'os'
 import { Agent } from '@mastra/core/agent'
 import { createTool } from '@mastra/core/tools'
 import { z } from 'zod'
@@ -367,11 +367,18 @@ function buildMastraTools(
             return { result: `Unsupported language: ${lang}. Use python, javascript, or bash.` }
           }
 
+          // Minimal env to prevent executed code from reading API keys or secrets
           const output = execSync(cmd, {
             timeout: 30000,
             maxBuffer: 1024 * 1024,
             encoding: 'utf-8',
-            cwd: tempDir
+            cwd: tempDir,
+            env: {
+              PATH: process.env.PATH || '/usr/bin:/bin:/usr/local/bin',
+              HOME: homedir(),
+              TMPDIR: tmpdir(),
+              LANG: process.env.LANG || 'en_US.UTF-8',
+            },
           })
 
           // Clean up
