@@ -499,6 +499,8 @@ export function TasksPage() {
                       {groupTasks.map((task, i) => {
                         const isExpanded = expandedTaskId === task.id
                         const priorityConf = PRIORITY_CONFIG[task.priority]
+                        const hasPendingApproval = task.conversationId ? pendingApprovals.some(a => a.conversationId === task.conversationId && a.status === 'pending') : false
+                        const isAgentWorking = isReplying || (task.status === 'in_progress' && task.messages.length > 0 && task.messages[task.messages.length - 1]?.content === '...') || hasPendingApproval
 
                         return (
                           <div
@@ -612,12 +614,11 @@ export function TasksPage() {
                                           <p className={`text-[13px] ${msg.role === 'tool' ? 'text-text-tertiary' : 'text-text-primary'} whitespace-pre-wrap`}>{msg.content}</p>
                                         </div>
                                       ))}
-                                      {/* Working indicator with stop button */}
-                                      {((isReplying && expandedTaskId === task.id) || (task.status === 'in_progress' && task.messages.length > 0 && task.messages[task.messages.length - 1]?.content === '...')) && (
+                                      {/* Working indicator (no stop — stop is on the reply input) */}
+                                      {isAgentWorking && !hasPendingApproval && (
                                         <div className="rounded-lg bg-bg-tertiary border border-border-default" style={{ padding: '10px 14px' }}>
                                           <AgentWorkingIndicator
                                             agentName={employees.find(e => e.id === task.toEmployeeId)?.name}
-                                            onStop={task.conversationId ? () => stopMessage(task.conversationId!) : undefined}
                                             size="sm"
                                           />
                                         </div>
@@ -666,12 +667,12 @@ export function TasksPage() {
                                               handleReply(task.id)
                                             }
                                           }}
-                                          placeholder={isReplying ? 'Agent is working...' : 'Reply to this task...'}
-                                          disabled={isReplying}
+                                          placeholder={isAgentWorking ? 'Agent is working...' : 'Reply to this task...'}
+                                          disabled={isAgentWorking}
                                         />
                                       </div>
-                                      {isReplying ? (
-                                        <StopButton onClick={() => {/* TODO: wire up stop */}} />
+                                      {isAgentWorking ? (
+                                        <StopButton onClick={() => task.conversationId && stopMessage(task.conversationId)} />
                                       ) : (
                                         <SendButton onClick={() => handleReply(task.id)} disabled={!replyText.trim()} />
                                       )}
