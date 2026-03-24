@@ -513,6 +513,8 @@ export class AgentManager {
   private onFileWritten?: (data: { conversationId: string; path: string; content: string }) => void
   private onToolCall?: (data: { conversationId: string; tool: string; summary: string; detail?: string }) => void
   private onApprovalRequest?: (data: { conversationId: string; approvalId: string; tool: string; args: Record<string, unknown>; summary: string }) => void
+  private onStreamChunk?: (data: { conversationId: string; chunk: string }) => void
+  private onMessageStoredCb?: (data: { conversationId: string; message: ChatMessage }) => void
   private pendingApprovals: Map<string, { resolve: (approved: boolean) => void; timer: ReturnType<typeof setTimeout> }> = new Map()
   private activeAbortControllers: Map<string, AbortController> = new Map()
   private activeTaskIds = new Set<string>()
@@ -553,6 +555,14 @@ export class AgentManager {
   /** Set callback for requesting tool approval from the user */
   setApprovalRequestCallback(cb: (data: { conversationId: string; approvalId: string; tool: string; args: Record<string, unknown>; summary: string }) => void) {
     this.onApprovalRequest = cb
+  }
+
+  setStreamCallback(cb: (data: { conversationId: string; chunk: string }) => void) {
+    this.onStreamChunk = cb
+  }
+
+  setMessageStoredCallback(cb: (data: { conversationId: string; message: ChatMessage }) => void) {
+    this.onMessageStoredCb = cb
   }
 
   /** Respond to a pending tool approval */
@@ -1344,11 +1354,12 @@ export class AgentManager {
         const resultContent = `[Task Result from ${toName}] (task: ${task.id})\nTask: ${task.objective}\nStatus: ${status}\n\nResult:\n${updated?.response || '(no response)'}`
 
         // Auto-trigger the delegating agent to process the result
+        console.log(`Injecting task result into conversation ${originConversationId}`)
         this.sendMessage(
           originConversationId,
           resultContent,
-          () => {},
-          undefined,
+          (chunk) => { this.onStreamChunk?.({ conversationId: originConversationId, chunk }) },
+          (msg) => { this.onMessageStoredCb?.({ conversationId: originConversationId, message: msg }) },
           true // skipApproval — automated callback
         ).catch(err => {
           console.error('Failed to auto-continue after task completion:', err)

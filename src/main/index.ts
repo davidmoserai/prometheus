@@ -601,6 +601,14 @@ app.whenReady().then(async () => {
     mainWindow?.webContents.send('chat:approvalRequest', data)
   })
 
+  // Wire stream + messageStored callbacks for auto-inject (task result → delegating agent chat)
+  agentManager.setStreamCallback((data) => {
+    mainWindow?.webContents.send('chat:stream', data)
+  })
+  agentManager.setMessageStoredCallback((data) => {
+    mainWindow?.webContents.send('chat:messageStored', data)
+  })
+
   // Initialize and start the scheduler
   scheduler = new Scheduler(store, agentManager, convService)
   scheduler.setTaskRunCallback((recurringTask) => {
