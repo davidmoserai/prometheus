@@ -585,9 +585,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       set((state) => {
         const next = new Set(state.sendingConversationIds)
         next.delete(conversationId)
-        return { sendingConversationIds: next }
+        // Keep non-text parts (tool calls, file writes, approvals) visible after streaming ends
+        // They get cleared on the next sendMessage call
+        const parts = state.streamingParts[conversationId]
+        const nonTextParts = parts?.filter(p => p.type !== 'text')
+        const newStreamingParts = nonTextParts && nonTextParts.length > 0
+          ? { ...state.streamingParts, [conversationId]: nonTextParts }
+          : (() => { const { [conversationId]: _, ...rest } = state.streamingParts; return rest })()
+        return { sendingConversationIds: next, streamingParts: newStreamingParts }
       })
-      get().clearStreamingParts(conversationId)
     }
   },
 
