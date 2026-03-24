@@ -1335,6 +1335,7 @@ export class AgentManager {
     if (updated) this.onTaskUpdate?.(updated)
 
     // Inject task result into the delegating agent's conversation and auto-trigger processing
+    console.log(`Task "${task.id}" completed. originConversationId: ${originConversationId || 'NONE'}`)
     if (originConversationId && this.convService) {
       try {
         const toName = toEmployee?.name || 'Unknown'
