@@ -791,6 +791,23 @@ function MessageBubble({
           {!isUser && (
             <p className="text-[11px] text-text-tertiary font-medium" style={{ marginBottom: '6px' }}>{employeeName}</p>
           )}
+          {/* Persisted tool calls — shown above the message */}
+          {!isUser && message.toolCalls && message.toolCalls.length > 0 && (
+            <div className="flex flex-col" style={{ gap: '4px', marginBottom: '6px' }}>
+              {message.toolCalls.map((tc) => (
+                <div
+                  key={tc.id}
+                  className="rounded-xl bg-white/[0.03] border-l-2 overflow-hidden"
+                  style={{ padding: '6px 10px', borderColor: 'var(--color-flame-500)' }}
+                >
+                  <div className="flex items-center" style={{ gap: '6px' }}>
+                    <Terminal className="w-3 h-3 text-text-tertiary shrink-0" />
+                    <span className="text-[11px] text-text-tertiary truncate">{tc.summary || tc.tool}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
           <div className={`rounded-2xl transition-all duration-300 ${
             isUser
               ? 'bg-gradient-to-br from-flame-500 to-flame-600 text-white rounded-tr-lg shadow-[0_4px_20px_-4px_rgba(249,115,22,0.25)]'

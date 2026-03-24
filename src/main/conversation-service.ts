@@ -113,16 +113,25 @@ export class ConversationService {
     const thread = await this.memory.getThreadById({ threadId })
     const resourceId = thread?.resourceId || ''
 
+    // Embed toolCalls inside content JSON (Mastra drops metadata, but content is preserved)
+    const contentObj: Record<string, unknown> = {
+      format: 2,
+      parts: [{ type: 'text' as const, text: message.content }]
+    }
+    if (message.toolCalls?.length) contentObj.toolCalls = message.toolCalls
+    if (message.attachments?.length) contentObj.attachments = message.attachments
+    if (message.handoffTo) contentObj.handoffTo = message.handoffTo
+    if (message.handoffFrom) contentObj.handoffFrom = message.handoffFrom
+
     await this.memory.saveMessages({
       messages: [{
         id,
         role: message.role,
-        content: { format: 2, parts: [{ type: 'text' as const, text: message.content }] } as any,
+        content: contentObj as any,
         threadId,
         resourceId,
         createdAt: now,
         type: 'text',
-        ...(Object.keys(metadata).length > 0 ? { metadata } : {})
       } as any]
     })
 
@@ -232,12 +241,13 @@ export class ConversationService {
       content = JSON.stringify(msg.content)
     }
 
-    // Extract metadata fields
+    // Extract extra fields from content object (Mastra drops metadata, so we embed in content)
+    const contentObj = (typeof msg.content === 'object' && msg.content) ? msg.content : {}
     const meta = (msg.metadata || {}) as Record<string, any>
-    const attachments = meta.attachments as ChatAttachment[] | undefined
-    const handoffTo = meta.handoffTo as string | undefined
-    const handoffFrom = meta.handoffFrom as string | undefined
-    const toolCalls = meta.toolCalls as ToolCallRecord[] | undefined
+    const attachments = (contentObj.attachments || meta.attachments) as ChatAttachment[] | undefined
+    const handoffTo = (contentObj.handoffTo || meta.handoffTo) as string | undefined
+    const handoffFrom = (contentObj.handoffFrom || meta.handoffFrom) as string | undefined
+    const toolCalls = (contentObj.toolCalls || meta.toolCalls) as ToolCallRecord[] | undefined
 
     return {
       id: msg.id,

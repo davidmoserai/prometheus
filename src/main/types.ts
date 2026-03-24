@@ -166,6 +166,7 @@ export interface Task {
   status: 'pending' | 'in_progress' | 'completed' | 'escalated'
   response?: string
   conversationId?: string
+  originConversationId?: string
   messages: TaskMessage[]
   createdAt: string
   updatedAt: string

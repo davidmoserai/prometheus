@@ -17,10 +17,14 @@ import {
   Bot,
   User
 } from 'lucide-react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { Badge } from '@/components/ui/badge'
 import { ChatTextarea, SendButton, StopButton } from '@/components/ui/chat-input'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
+import { ToolApprovalCard } from '@/components/ui/tool-approval-card'
+import { AgentWorkingIndicator } from '@/components/ui/agent-working-indicator'
 import { useAppStore, type Task, type RecurringTask } from '@/stores/app-store'
 
 const STATUS_CONFIG = {
@@ -76,7 +80,10 @@ export function TasksPage() {
     replyToTask,
     createRecurringTask,
     updateRecurringTask,
-    deleteRecurringTask
+    deleteRecurringTask,
+    pendingApprovals,
+    respondToApproval,
+    stopMessage
   } = useAppStore()
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null)
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
@@ -494,6 +501,8 @@ export function TasksPage() {
                       {groupTasks.map((task, i) => {
                         const isExpanded = expandedTaskId === task.id
                         const priorityConf = PRIORITY_CONFIG[task.priority]
+                        const hasPendingApproval = task.conversationId ? pendingApprovals.some(a => a.conversationId === task.conversationId && a.status === 'pending') : false
+                        const isAgentWorking = isReplying || (task.status === 'in_progress' && task.messages.length > 0 && task.messages[task.messages.length - 1]?.content === '...') || hasPendingApproval
 
                         return (
                           <div
@@ -533,9 +542,6 @@ export function TasksPage() {
                                 </p>
                               </div>
 
-                              <Badge className={priorityConf.className}>
-                                {priorityConf.label}
-                              </Badge>
 
                               {task.deadline && (
                                 <span className="text-[12px] text-text-tertiary shrink-0">
@@ -559,8 +565,6 @@ export function TasksPage() {
                                   <div className="flex flex-col text-text-tertiary" style={{ gap: '4px' }}>
                                     <p><span className="text-text-secondary">To:</span> {getEmployeeName(task.toEmployeeId)}</p>
                                     <p><span className="text-text-secondary">From:</span> {getEmployeeName(task.fromEmployeeId)}</p>
-                                    <p><span className="text-text-secondary">Priority:</span> <span className={PRIORITY_CONFIG[task.priority].className.split(' ')[1]}>{task.priority.charAt(0).toUpperCase() + task.priority.slice(1)}</span></p>
-                                    {task.deadline && <p><span className="text-text-secondary">Deadline:</span> {task.deadline}</p>}
                                   </div>
 
                                   <div style={{ marginTop: '16px' }}>
@@ -590,11 +594,11 @@ export function TasksPage() {
                                 </div>
 
                                 {/* Task Thread */}
-                                {task.messages && task.messages.length > 0 && (
+                                {((task.messages && task.messages.filter(m => m.content !== '...').length > 0) || (task.conversationId && pendingApprovals.some(a => a.conversationId === task.conversationId))) && (
                                   <div style={{ marginTop: '16px', marginBottom: '20px' }}>
                                     <p className="text-[12px] font-medium text-text-tertiary uppercase tracking-wider" style={{ marginBottom: '12px' }}>Activity</p>
                                     <div className="flex flex-col" style={{ gap: '8px' }}>
-                                      {task.messages.map((msg) => (
+                                      {task.messages.filter(m => m.content !== '...').map((msg) => (
                                         <div key={msg.id} className={`rounded-lg ${
                                           msg.role === 'tool' ? 'bg-white/[0.02]' : msg.role === 'user' ? 'bg-flame-500/[0.06] border border-flame-500/15' : 'bg-bg-tertiary border border-border-default'
                                         }`} style={{ padding: '10px 14px' }}>
@@ -609,28 +613,39 @@ export function TasksPage() {
                                               {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                             </span>
                                           </div>
-                                          <p className={`text-[13px] ${msg.role === 'tool' ? 'text-text-tertiary' : 'text-text-primary'} whitespace-pre-wrap`}>{msg.content}</p>
+                                          {msg.role === 'tool' ? (
+                                            <p className="text-[13px] text-text-tertiary whitespace-pre-wrap">{msg.content}</p>
+                                          ) : (
+                                            <div className="text-[13px] text-text-primary chat-markdown">
+                                              <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+                                            </div>
+                                          )}
                                         </div>
                                       ))}
-                                      {/* Thinking indicator while agent is working */}
-                                      {isReplying && expandedTaskId === task.id && (
+                                      {/* Working indicator (no stop — stop is on the reply input) */}
+                                      {isAgentWorking && !hasPendingApproval && (
                                         <div className="rounded-lg bg-bg-tertiary border border-border-default" style={{ padding: '10px 14px' }}>
-                                          <div className="flex items-center" style={{ gap: '6px', marginBottom: '4px' }}>
-                                            <Bot className="w-3 h-3 text-sky-400" />
-                                            <span className="text-[11px] text-text-tertiary">
-                                              {employees.find(e => e.id === task.toEmployeeId)?.name || 'Agent'}
-                                            </span>
-                                          </div>
-                                          <div className="flex items-center" style={{ gap: '6px' }}>
-                                            <div className="flex" style={{ gap: '4px' }}>
-                                              <span className="w-1.5 h-1.5 rounded-full bg-text-tertiary" style={{ animation: 'pulse-dot 1.4s ease-in-out infinite', animationDelay: '0s' }} />
-                                              <span className="w-1.5 h-1.5 rounded-full bg-text-tertiary" style={{ animation: 'pulse-dot 1.4s ease-in-out infinite', animationDelay: '0.2s' }} />
-                                              <span className="w-1.5 h-1.5 rounded-full bg-text-tertiary" style={{ animation: 'pulse-dot 1.4s ease-in-out infinite', animationDelay: '0.4s' }} />
-                                            </div>
-                                            <span className="text-[12px] text-text-tertiary">Working...</span>
-                                          </div>
+                                          <AgentWorkingIndicator
+                                            agentName={employees.find(e => e.id === task.toEmployeeId)?.name}
+                                            size="sm"
+                                          />
                                         </div>
                                       )}
+                                      {/* Pending tool approvals for this task (only show pending, not already approved/rejected) */}
+                                      {task.conversationId && pendingApprovals
+                                        .filter(a => a.conversationId === task.conversationId && a.status === 'pending')
+                                        .map(approval => (
+                                          <ToolApprovalCard
+                                            key={approval.approvalId}
+                                            approvalId={approval.approvalId}
+                                            tool={approval.tool}
+                                            args={approval.args}
+                                            summary={approval.summary}
+                                            status={approval.status}
+                                            onRespond={respondToApproval}
+                                          />
+                                        ))
+                                      }
                                     </div>
                                   </div>
                                 )}
@@ -642,7 +657,9 @@ export function TasksPage() {
                                     style={{ padding: '20px', marginBottom: '20px' }}
                                   >
                                     <p className="text-[13px] text-emerald-400 font-semibold" style={{ marginBottom: '8px' }}>Response</p>
-                                    <p className="text-[13px] text-text-secondary whitespace-pre-wrap">{task.response}</p>
+                                    <div className="text-[13px] text-text-secondary chat-markdown">
+                                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{task.response}</ReactMarkdown>
+                                    </div>
                                   </div>
                                 )}
 
@@ -660,12 +677,12 @@ export function TasksPage() {
                                               handleReply(task.id)
                                             }
                                           }}
-                                          placeholder={isReplying ? 'Agent is working...' : 'Reply to this task...'}
-                                          disabled={isReplying}
+                                          placeholder={isAgentWorking ? 'Agent is working...' : 'Reply to this task...'}
+                                          disabled={isAgentWorking}
                                         />
                                       </div>
-                                      {isReplying ? (
-                                        <StopButton onClick={() => {/* TODO: wire up stop */}} />
+                                      {isAgentWorking ? (
+                                        <StopButton onClick={() => task.conversationId && stopMessage(task.conversationId)} />
                                       ) : (
                                         <SendButton onClick={() => handleReply(task.id)} disabled={!replyText.trim()} />
                                       )}

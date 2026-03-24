@@ -6,7 +6,7 @@ import { RecurringTask } from './types'
 /**
  * Scheduler checks recurring tasks every 60 seconds and executes any that are due.
  */
-const STUCK_TASK_THRESHOLD_MS = 5 * 60 * 1000 // 5 minutes
+const STUCK_TASK_THRESHOLD_MS = 60 * 1000 // 1 minute
 const MAX_RETRIES = 2
 
 export class Scheduler {
@@ -81,6 +81,24 @@ export class Scheduler {
         continue
       }
 
+      // Check if the task already has a real response (agent did the work but task wasn't marked complete)
+      const hasToolMessages = task.messages.some(m => m.role === 'tool')
+      const hasSubstantialResponse = task.response && task.response.length > 200
+      if (hasToolMessages || hasSubstantialResponse) {
+        console.log(`Task "${task.id}" has work done but wasn't completed — marking complete`)
+        this.store.updateTask(task.id, { status: 'completed' })
+        this.taskRetries.delete(task.id)
+        // Inject result back to delegating agent
+        if (task.originConversationId) {
+          const toEmp = this.store.getEmployee(task.toEmployeeId)
+          const resultContent = `[Task Result from ${toEmp?.name || 'Agent'}] (task: ${task.id})\nTask: ${task.objective}\nStatus: completed\n\nResult:\n${task.response || task.messages.filter(m => m.role === 'agent').pop()?.content || '(no response)'}`
+          this.agentManager.sendMessage(
+            task.originConversationId, resultContent, () => {}, undefined, true
+          ).catch(() => {})
+        }
+        continue
+      }
+
       // Re-trigger the stuck task
       console.log(`Recovering stuck task "${task.id}" (attempt ${retries + 1}/${MAX_RETRIES})`)
       this.taskRetries.set(task.id, retries + 1)
@@ -89,7 +107,6 @@ export class Scheduler {
           task.id,
           'Your previous attempt did not complete. Please execute the task now and produce the deliverable.'
         )
-        // Success — reset retry counter
         this.taskRetries.delete(task.id)
       } catch (err) {
         console.error(`Failed to recover task "${task.id}":`, err)
