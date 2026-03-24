@@ -325,6 +325,7 @@ export class MCPManager {
     }
     const serverTools = toolsets[config.id] || {}
     this.toolCache.set(config.id, serverTools)
+    this.lastUsed.set(config.id, Date.now())
 
     return Object.keys(serverTools)
   }

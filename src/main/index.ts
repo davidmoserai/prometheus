@@ -234,6 +234,22 @@ function registerIpcHandlers(): void {
   ipcMain.handle('mcp:list', () => {
     const s = store.getSettings()
     const servers = s.mcpServers || []
+
+    // Include connected native integrations (not persisted to mcpServers)
+    const enabledNativeIds = s.enabledNativeIntegrations || []
+    for (const integration of NATIVE_INTEGRATIONS) {
+      if (enabledNativeIds.includes(integration.id)) {
+        servers.push({
+          id: integration.id,
+          name: integration.name,
+          command: '',
+          args: [],
+          enabled: true,
+          isNative: true
+        })
+      }
+    }
+
     // Include the in-memory Composio MCP server if it's connected (not persisted to disk)
     const composioTools = mcpManager.getToolNames(COMPOSIO_MCP_SERVER_ID)
     if (composioTools.length > 0) {
