@@ -39,7 +39,10 @@ function createWindow(): void {
   })
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url)
+    const allowed = ['https://', 'http://', 'mailto:']
+    if (allowed.some(p => url.startsWith(p))) {
+      shell.openExternal(url)
+    }
     return { action: 'deny' }
   })
 
@@ -348,8 +351,14 @@ function registerIpcHandlers(): void {
     autoUpdater.quitAndInstall()
   })
 
-  // Open URLs in the system default browser
-  ipcMain.handle('shell:openExternal', (_, url: string) => shell.openExternal(url))
+  // Open URLs in the system default browser (protocol whitelist)
+  ipcMain.handle('shell:openExternal', (_, url: string) => {
+    const allowed = ['https://', 'http://', 'mailto:']
+    if (!allowed.some(p => url.startsWith(p))) {
+      throw new Error('Blocked: only http, https, and mailto URLs are allowed')
+    }
+    shell.openExternal(url)
+  })
 }
 
 // Initialize or reinitialize Composio and connect its MCP session

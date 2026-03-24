@@ -1,5 +1,5 @@
 import { MCPClient } from '@mastra/mcp'
-import { shell } from 'electron'
+import { dialog, shell } from 'electron'
 import { execSync } from 'child_process'
 import { readFileSync } from 'fs'
 import type { Tool } from '@mastra/core/tools'
@@ -49,8 +49,20 @@ function watchStderrForUrls(client: MCPClient, serverId: string): void {
       // Look for URLs that look like OAuth/auth redirects
       const urlMatch = text.match(/https?:\/\/[^\s"'<>)]+/)
       if (urlMatch) {
-        console.log(`MCP server "${serverId}" requested browser auth: ${urlMatch[0]}`)
-        shell.openExternal(urlMatch[0])
+        const url = urlMatch[0]
+        console.log(`MCP server "${serverId}" requested browser auth: ${url}`)
+        dialog.showMessageBox({
+          type: 'question',
+          buttons: ['Open', 'Cancel'],
+          defaultId: 1,
+          title: 'MCP Server URL',
+          message: `MCP server "${serverId}" wants to open a URL:`,
+          detail: url,
+        }).then(({ response }) => {
+          if (response === 0) {
+            shell.openExternal(url)
+          }
+        })
       }
     })
   } catch {

@@ -1,4 +1,4 @@
-import { app } from 'electron'
+import { app, safeStorage } from 'electron'
 import { join, basename, extname } from 'path'
 import { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync, statSync, rmSync } from 'fs'
 import { v4 as uuid } from 'uuid'
@@ -56,6 +56,24 @@ interface LegacyStoreData {
   settings?: AppSettings
 }
 
+function encryptString(value: string): string {
+  if (!value || !safeStorage.isEncryptionAvailable()) return value
+  const encrypted = safeStorage.encryptString(value)
+  return 'encrypted:v1:' + encrypted.toString('base64')
+}
+
+function decryptString(value: string): string {
+  if (!value || !value.startsWith('encrypted:v1:')) return value
+  if (!safeStorage.isEncryptionAvailable()) return value
+  try {
+    const buffer = Buffer.from(value.slice('encrypted:v1:'.length), 'base64')
+    return safeStorage.decryptString(buffer)
+  } catch {
+    console.error('Failed to decrypt stored key — returning empty')
+    return ''
+  }
+}
+
 function emptyCompanyData(): CompanyData {
   return { employees: [], knowledge: [], departments: [], tasks: [], recurringTasks: [] }
 }
@@ -97,6 +115,16 @@ export class EmployeeStore {
               }
             }
           }
+          // Decrypt API keys after loading from disk
+          if (raw.settings?.providers) {
+            for (const prov of raw.settings.providers) {
+              if (prov.apiKey) prov.apiKey = decryptString(prov.apiKey)
+            }
+          }
+          if (raw.settings?.composioApiKey) {
+            raw.settings.composioApiKey = decryptString(raw.settings.composioApiKey)
+          }
+
           return raw as StoreData
         }
 
@@ -189,7 +217,20 @@ export class EmployeeStore {
   }
 
   private save(): void {
-    writeFileSync(this.dataPath, JSON.stringify(this.data, null, 2))
+    // Deep-clone so in-memory state stays decrypted
+    const clone = JSON.parse(JSON.stringify(this.data))
+
+    // Encrypt API keys before writing to disk
+    if (clone.settings?.providers) {
+      for (const prov of clone.settings.providers) {
+        if (prov.apiKey) prov.apiKey = encryptString(prov.apiKey)
+      }
+    }
+    if (clone.settings?.composioApiKey) {
+      clone.settings.composioApiKey = encryptString(clone.settings.composioApiKey)
+    }
+
+    writeFileSync(this.dataPath, JSON.stringify(clone, null, 2))
   }
 
   private getActiveData(): CompanyData {
