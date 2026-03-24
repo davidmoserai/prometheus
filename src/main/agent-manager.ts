@@ -102,7 +102,7 @@ function buildProviderOptions(provider: ProviderConfig, hasTools: boolean): Reco
 function formatTaskStatus(task: Task, store: EmployeeStore): string {
   const toEmp = store.getEmployee(task.toEmployeeId)
   const toName = toEmp?.name || 'Unknown'
-  let result = `**Task ${task.id}** — ${task.status.toUpperCase()}\nAssigned to: ${toName}\nObjective: ${task.objective}\nPriority: ${task.priority}\nDeadline: ${task.deadline || 'Not specified'}`
+  let result = `**Task ${task.id}** — ${task.status.toUpperCase()}\nAssigned to: ${toName}\nObjective: ${task.objective}`
   if (task.response) {
     result += `\n\nResponse:\n${task.response.slice(0, 1000)}${task.response.length > 1000 ? '...' : ''}`
   }
@@ -142,8 +142,6 @@ function buildMastraTools(
       description: 'Delegate a task to another employee. Use this when work should be handled by a team member with the right expertise.',
       inputSchema: z.object({
         to_employee_id: z.string().describe('ID of the employee to delegate to'),
-        priority: z.enum(['high', 'medium', 'low']),
-        deadline: z.string().describe('When the task should be completed'),
         objective: z.string().describe('One sentence: what outcome is required'),
         context: z.string().describe('Minimum context the agent needs'),
         deliverable: z.string().describe('Exact output format expected'),
@@ -156,7 +154,7 @@ function buildMastraTools(
           return { result: "You don't have permission to contact that employee." }
         }
         const toEmp = store.getEmployee(input.to_employee_id)
-        const briefDetail = `To: ${toEmp?.name || 'Unknown'} (${toEmp?.role || 'unknown role'})\nPriority: ${input.priority}\nDeadline: ${input.deadline || 'Not specified'}\n\nObjective:\n${input.objective}\n\nContext:\n${input.context}\n\nDeliverable:\n${input.deliverable}\n\nAcceptance Criteria:\n${input.acceptance_criteria}\n\nEscalate if:\n${input.escalate_if}`
+        const briefDetail = `To: ${toEmp?.name || 'Unknown'} (${toEmp?.role || 'unknown role'})\n\nObjective:\n${input.objective}\n\nContext:\n${input.context}\n\nDeliverable:\n${input.deliverable}\n\nAcceptance Criteria:\n${input.acceptance_criteria}\n\nEscalate if:\n${input.escalate_if}`
         onToolCall?.({ tool: 'delegate_task', summary: `Delegated task to ${toEmp?.name || 'employee'}: ${input.objective}`, detail: briefDetail })
         const { message } = onDelegateTask(employee, input as Record<string, string>, conversationId)
         return { result: message }
@@ -517,6 +515,7 @@ export class AgentManager {
   private onApprovalRequest?: (data: { conversationId: string; approvalId: string; tool: string; args: Record<string, unknown>; summary: string }) => void
   private pendingApprovals: Map<string, { resolve: (approved: boolean) => void; timer: ReturnType<typeof setTimeout> }> = new Map()
   private activeAbortControllers: Map<string, AbortController> = new Map()
+  private activeTaskIds = new Set<string>()
   private activeClaudeCodeAborts: Map<string, () => void> = new Map()
 
   constructor(store: EmployeeStore, mcpManager?: MCPManager, convService?: ConversationService) {
@@ -594,6 +593,11 @@ export class AgentManager {
     for (const conversationId of this.activeAbortControllers.keys()) {
       this.abortStream(conversationId)
     }
+  }
+
+  /** Check if a task is currently being executed */
+  isTaskActive(taskId: string): boolean {
+    return this.activeTaskIds.has(taskId)
   }
 
   async sendMessage(
@@ -992,8 +996,8 @@ export class AgentManager {
     const task = this.store.createTask({
       fromEmployeeId: fromEmployee.id,
       toEmployeeId: args.to_employee_id,
-      priority: (args.priority || 'medium') as Task['priority'],
-      deadline: args.deadline || '',
+      priority: 'medium' as Task['priority'],
+      deadline: '',
       objective: args.objective,
       context: args.context,
       deliverable: args.deliverable,
@@ -1042,7 +1046,7 @@ export class AgentManager {
       if (updated) this.onTaskUpdate?.(updated)
     })
 
-    const message = `Task delegated to **${toName}** (task: ${task.id}). They're working on it now. Use check_task_status to monitor progress.\n\n**Objective:** ${args.objective}\n**Priority:** ${args.priority}\n**Deadline:** ${args.deadline || 'Not specified'}`
+    const message = `Task delegated to **${toName}** (task: ${task.id}). They're executing it now. Use check_task_status to monitor progress.\n\n**Objective:** ${args.objective}`
 
     return { task, message }
   }
@@ -1192,6 +1196,15 @@ export class AgentManager {
    * Auto-execute a task: send the Agent Brief to the target employee and capture their response.
    */
   private async executeTask(task: Task, originConversationId?: string): Promise<void> {
+    this.activeTaskIds.add(task.id)
+    try {
+      await this._executeTaskInner(task, originConversationId)
+    } finally {
+      this.activeTaskIds.delete(task.id)
+    }
+  }
+
+  private async _executeTaskInner(task: Task, originConversationId?: string): Promise<void> {
     const toEmployee = this.store.getEmployee(task.toEmployeeId)
     if (!toEmployee) throw new Error('Target employee not found')
 
@@ -1209,7 +1222,7 @@ export class AgentManager {
     if (inProgress) this.onTaskUpdate?.(inProgress)
 
     // Build the brief as a user message to the target agent
-    const brief = `AGENT BRIEF\nTo: ${toEmployee.name} (${toEmployee.role})\nFrom: ${fromName}\nPriority: ${task.priority}\nDeadline: ${task.deadline || 'Not specified'}\n\nObjective:\n${task.objective}\n\nContext:\n${task.context}\n\nDeliverable:\n${task.deliverable}\n\nAcceptance Criteria:\n${task.acceptanceCriteria}\n\nEscalate to founder if:\n${task.escalateIf}`
+    const brief = `AGENT BRIEF — EXECUTE NOW\nTo: ${toEmployee.name} (${toEmployee.role})\nFrom: ${fromName}\n\nObjective:\n${task.objective}\n\nContext:\n${task.context}\n\nDeliverable:\n${task.deliverable}\n\nAcceptance Criteria:\n${task.acceptanceCriteria}\n\nEscalate to founder if:\n${task.escalateIf}\n\nIMPORTANT: Do NOT just acknowledge this task. Execute it immediately and produce the deliverable in your response. Use your tools to complete the work now.`
 
     // Build system prompt for target employee
     const systemPrompt = await this.buildSystemPrompt(toEmployee)
@@ -1297,9 +1310,9 @@ export class AgentManager {
         }
       }
 
-      // Save response but keep as in_progress — user reviews and marks complete
+      // Save response
       this.store.updateTask(task.id, {
-        status: 'in_progress',
+        status: 'completed',
         response: responseText
       })
     } catch (err) {
@@ -1338,6 +1351,15 @@ export class AgentManager {
    * Continue a task conversation: add a user reply and run the agent again.
    */
   async continueTask(taskId: string, userMessage: string): Promise<void> {
+    this.activeTaskIds.add(taskId)
+    try {
+      await this._continueTaskInner(taskId, userMessage)
+    } finally {
+      this.activeTaskIds.delete(taskId)
+    }
+  }
+
+  private async _continueTaskInner(taskId: string, userMessage: string): Promise<void> {
     const task = this.store.getTask(taskId)
     if (!task) throw new Error('Task not found')
 
@@ -1357,7 +1379,7 @@ export class AgentManager {
     const fromEmployee = this.store.getEmployee(task.fromEmployeeId)
     const fromName = fromEmployee?.name || 'Unknown'
 
-    const brief = `AGENT BRIEF\nTo: ${toEmployee.name} (${toEmployee.role})\nFrom: ${fromName}\nPriority: ${task.priority}\nDeadline: ${task.deadline || 'Not specified'}\n\nObjective:\n${task.objective}\n\nContext:\n${task.context}\n\nDeliverable:\n${task.deliverable}\n\nAcceptance Criteria:\n${task.acceptanceCriteria}\n\nEscalate to founder if:\n${task.escalateIf}`
+    const brief = `AGENT BRIEF — EXECUTE NOW\nTo: ${toEmployee.name} (${toEmployee.role})\nFrom: ${fromName}\n\nObjective:\n${task.objective}\n\nContext:\n${task.context}\n\nDeliverable:\n${task.deliverable}\n\nAcceptance Criteria:\n${task.acceptanceCriteria}\n\nEscalate to founder if:\n${task.escalateIf}\n\nIMPORTANT: Do NOT just acknowledge this task. Execute it immediately and produce the deliverable in your response. Use your tools to complete the work now.`
 
     const messages: { role: 'user' | 'assistant' | 'system'; content: string }[] = [
       { role: 'user', content: brief },
@@ -1537,10 +1559,11 @@ export class AgentManager {
     }
 
     // Task delegation instructions
-    prompt += '\n\nWhen working on a delegated task:'
-    prompt += '\n- If you need more information, use message_employee to ask the sender'
-    prompt += '\n- If you need something only the founder can provide, clearly state what you need — they can reply directly on the task'
-    prompt += '\n- Don\'t produce a half-finished deliverable. Ask first, deliver second.'
+    prompt += '\n\nWhen you receive an AGENT BRIEF:'
+    prompt += '\n- Execute the task IMMEDIATELY. Do not just acknowledge it — produce the deliverable in your response.'
+    prompt += '\n- Use your tools (file writing, web search, code execution, etc.) to complete the work.'
+    prompt += '\n- If you truly cannot proceed without more information, use message_employee to ask the sender.'
+    prompt += '\n- If you need something only the founder can provide, clearly state what you need — they can reply directly on the task.'
 
     return prompt
   }

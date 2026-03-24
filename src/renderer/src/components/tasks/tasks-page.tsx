@@ -532,15 +532,6 @@ export function TasksPage() {
                                 </p>
                               </div>
 
-                              <Badge className={priorityConf.className}>
-                                {priorityConf.label}
-                              </Badge>
-
-                              {task.deadline && (
-                                <span className="text-[12px] text-text-tertiary shrink-0">
-                                  {task.deadline}
-                                </span>
-                              )}
                             </button>
 
                             {/* Expanded details */}
@@ -558,8 +549,6 @@ export function TasksPage() {
                                   <div className="flex flex-col text-text-tertiary" style={{ gap: '4px' }}>
                                     <p><span className="text-text-secondary">To:</span> {getEmployeeName(task.toEmployeeId)}</p>
                                     <p><span className="text-text-secondary">From:</span> {getEmployeeName(task.fromEmployeeId)}</p>
-                                    <p><span className="text-text-secondary">Priority:</span> <span className={PRIORITY_CONFIG[task.priority].className.split(' ')[1]}>{task.priority.charAt(0).toUpperCase() + task.priority.slice(1)}</span></p>
-                                    {task.deadline && <p><span className="text-text-secondary">Deadline:</span> {task.deadline}</p>}
                                   </div>
 
                                   <div style={{ marginTop: '16px' }}>

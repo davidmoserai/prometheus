@@ -136,8 +136,6 @@ export function startInternalServer(ctx: InternalServerContext): Promise<{ port:
           if (!fromEmp) { respond(res, 404, { result: 'Employee not found.' }); return }
           const args: Record<string, string> = {
             to_employee_id: toId,
-            priority: (body.priority as string) || 'medium',
-            deadline: (body.deadline as string) || '',
             objective: (body.objective as string) || '',
             context: (body.context as string) || '',
             deliverable: (body.deliverable as string) || '',
