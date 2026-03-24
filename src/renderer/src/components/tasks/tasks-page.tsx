@@ -631,9 +631,9 @@ export function TasksPage() {
                                           />
                                         </div>
                                       )}
-                                      {/* Pending tool approvals for this task */}
+                                      {/* Pending tool approvals for this task (only show pending, not already approved/rejected) */}
                                       {task.conversationId && pendingApprovals
-                                        .filter(a => a.conversationId === task.conversationId)
+                                        .filter(a => a.conversationId === task.conversationId && a.status === 'pending')
                                         .map(approval => (
                                           <ToolApprovalCard
                                             key={approval.approvalId}

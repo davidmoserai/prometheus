@@ -1488,7 +1488,7 @@ export class AgentManager {
           this.store.updateTask(taskId, { messages: ft.messages })
         }
       }
-      this.store.updateTask(taskId, { response: responseText })
+      this.store.updateTask(taskId, { status: 'completed', response: responseText })
     } catch (err) {
       const errorMsg = `Error: ${err instanceof Error ? err.message : 'Unknown error'}`
       this.store.addTaskMessage(taskId, { role: 'tool', content: errorMsg })
@@ -1497,6 +1497,33 @@ export class AgentManager {
 
     const updated = this.store.getTask(taskId)
     if (updated) this.onTaskUpdate?.(updated)
+
+    // Inject result back into the delegating agent's conversation
+    if (updated?.status === 'completed') {
+      const fromEmployee = this.store.getEmployee(task.fromEmployeeId)
+      // Find the original conversation by looking at recent conversations for the delegating employee
+      // The task doesn't store originConversationId, so we use the most recent conversation
+      const companyId = this.store.getActiveCompanyId() || ''
+      if (fromEmployee && this.convService) {
+        try {
+          const convs = await this.convService.listConversations(fromEmployee.id, companyId)
+          const latestConv = convs[0]
+          if (latestConv) {
+            const toName = toEmployee?.name || 'Unknown'
+            const resultContent = `[Task Result from ${toName}] (task: ${taskId})\nTask: ${task.objective}\nStatus: completed\n\nResult:\n${updated.response || '(no response)'}`
+            this.sendMessage(
+              latestConv.id,
+              resultContent,
+              () => {},
+              undefined,
+              true
+            ).catch(err => {
+              console.error('Failed to auto-continue after task completion:', err)
+            })
+          }
+        } catch {}
+      }
+    }
   }
 
   /**
