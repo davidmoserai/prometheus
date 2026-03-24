@@ -18,6 +18,7 @@ import {
   User
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
+import { ChatTextarea, SendButton, StopButton } from '@/components/ui/chat-input'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { useAppStore, type Task, type RecurringTask } from '@/stores/app-store'
@@ -648,19 +649,26 @@ export function TasksPage() {
                                 {/* Reply input */}
                                 {(task.status === 'in_progress' || task.status === 'escalated') && (
                                   <div style={{ marginBottom: '20px' }}>
-                                    <div className="flex" style={{ gap: '8px' }}>
-                                      <input
-                                        value={expandedTaskId === task.id ? replyText : ''}
-                                        onChange={(e) => setReplyText(e.target.value)}
-                                        onKeyDown={(e) => e.key === 'Enter' && handleReply(task.id)}
-                                        placeholder="Reply to this task..."
-                                        className="flex-1 rounded-lg bg-bg-tertiary border border-border-default text-[13px] text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-flame-500/30"
-                                        style={{ padding: '10px 14px' }}
-                                        disabled={isReplying}
-                                      />
-                                      <Button size="sm" onClick={() => handleReply(task.id)} disabled={!replyText.trim() || isReplying} style={isReplying ? { cursor: 'not-allowed' } : undefined}>
-                                        {isReplying ? 'Sending...' : 'Send'}
-                                      </Button>
+                                    <div className="flex items-end" style={{ gap: '10px' }}>
+                                      <div className="flex-1">
+                                        <ChatTextarea
+                                          value={expandedTaskId === task.id ? replyText : ''}
+                                          onChange={(e) => setReplyText(e.target.value)}
+                                          onKeyDown={(e) => {
+                                            if (e.key === 'Enter' && !e.shiftKey) {
+                                              e.preventDefault()
+                                              handleReply(task.id)
+                                            }
+                                          }}
+                                          placeholder={isReplying ? 'Agent is working...' : 'Reply to this task...'}
+                                          disabled={isReplying}
+                                        />
+                                      </div>
+                                      {isReplying ? (
+                                        <StopButton onClick={() => {/* TODO: wire up stop */}} />
+                                      ) : (
+                                        <SendButton onClick={() => handleReply(task.id)} disabled={!replyText.trim()} />
+                                      )}
                                     </div>
                                     {replyError && expandedTaskId === task.id && (
                                       <div className="rounded-lg bg-ember-500/10 border border-ember-500/20" style={{ padding: '10px 14px', marginTop: '8px' }}>

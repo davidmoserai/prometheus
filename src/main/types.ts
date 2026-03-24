@@ -126,6 +126,13 @@ export interface ChatAttachment {
   size: number
 }
 
+export interface ToolCallRecord {
+  id: string
+  tool: string
+  summary: string
+  detail?: string
+}
+
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant' | 'system'
@@ -134,6 +141,7 @@ export interface ChatMessage {
   handoffTo?: string
   handoffFrom?: string
   attachments?: ChatAttachment[]
+  toolCalls?: ToolCallRecord[]
 }
 
 export interface TaskMessage {
@@ -157,6 +165,7 @@ export interface Task {
   escalateIf: string
   status: 'pending' | 'in_progress' | 'completed' | 'escalated'
   response?: string
+  conversationId?: string
   messages: TaskMessage[]
   createdAt: string
   updatedAt: string

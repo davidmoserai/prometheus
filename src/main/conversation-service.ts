@@ -2,7 +2,7 @@ import { app } from 'electron'
 import { join } from 'path'
 import { existsSync, rmSync } from 'fs'
 import { v4 as uuid } from 'uuid'
-import type { Conversation, ChatMessage, ChatAttachment } from './types'
+import type { Conversation, ChatMessage, ChatAttachment, ToolCallRecord } from './types'
 import { getMemory } from './memory'
 
 /**
@@ -102,11 +102,12 @@ export class ConversationService {
     const id = uuid()
     const now = new Date()
 
-    // Build metadata for extra fields (attachments, handoff)
+    // Build metadata for extra fields (attachments, handoff, tool calls)
     const metadata: Record<string, unknown> = {}
     if (message.attachments?.length) metadata.attachments = message.attachments
     if (message.handoffTo) metadata.handoffTo = message.handoffTo
     if (message.handoffFrom) metadata.handoffFrom = message.handoffFrom
+    if (message.toolCalls?.length) metadata.toolCalls = message.toolCalls
 
     // Get thread to find resourceId
     const thread = await this.memory.getThreadById({ threadId })
@@ -145,7 +146,8 @@ export class ConversationService {
       timestamp: now.toISOString(),
       ...(message.attachments?.length ? { attachments: message.attachments } : {}),
       ...(message.handoffTo ? { handoffTo: message.handoffTo } : {}),
-      ...(message.handoffFrom ? { handoffFrom: message.handoffFrom } : {})
+      ...(message.handoffFrom ? { handoffFrom: message.handoffFrom } : {}),
+      ...(message.toolCalls?.length ? { toolCalls: message.toolCalls } : {})
     }
   }
 
@@ -235,6 +237,7 @@ export class ConversationService {
     const attachments = meta.attachments as ChatAttachment[] | undefined
     const handoffTo = meta.handoffTo as string | undefined
     const handoffFrom = meta.handoffFrom as string | undefined
+    const toolCalls = meta.toolCalls as ToolCallRecord[] | undefined
 
     return {
       id: msg.id,
@@ -243,7 +246,8 @@ export class ConversationService {
       timestamp: msg.createdAt instanceof Date ? msg.createdAt.toISOString() : String(msg.createdAt),
       ...(attachments?.length ? { attachments } : {}),
       ...(handoffTo ? { handoffTo } : {}),
-      ...(handoffFrom ? { handoffFrom } : {})
+      ...(handoffFrom ? { handoffFrom } : {}),
+      ...(toolCalls?.length ? { toolCalls } : {})
     }
   }
 }

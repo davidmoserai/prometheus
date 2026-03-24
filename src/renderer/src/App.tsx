@@ -73,7 +73,9 @@ export default function App() {
   useEffect(() => {
     if (!window.api?.chat?.onApprovalRequest) return
     const unsub = window.api.chat.onApprovalRequest((data) => {
-      useAppStore.getState().appendStreamPart(data.conversationId, {
+      const store = useAppStore.getState()
+      // Add to streaming parts (for chat page inline rendering)
+      store.appendStreamPart(data.conversationId, {
         type: 'tool_approval',
         approvalId: data.approvalId,
         tool: data.tool,
@@ -81,10 +83,19 @@ export default function App() {
         summary: data.summary,
         status: 'pending'
       })
-      useAppStore.getState().addNotification({
+      // Add to global pending approvals (accessible from any page)
+      store.addPendingApproval({
+        approvalId: data.approvalId,
+        tool: data.tool,
+        args: data.args,
+        summary: data.summary,
+        conversationId: data.conversationId
+      })
+      store.addNotification({
         type: 'tool_approval',
         title: 'Tool Approval Needed',
-        body: `${data.tool} requires your approval`
+        body: `${data.tool} requires your approval`,
+        metadata: { conversationId: data.conversationId }
       })
     })
     return () => { unsub() }
@@ -103,15 +114,20 @@ export default function App() {
               : c
           )
         }
-        // Remove text parts from streaming when assistant message is stored to prevent duplicates
-        // Keep tool_call, file_written, and tool_approval parts as they're not in the persisted message
+        // When assistant message has toolCalls, they're now persisted — clear all streaming parts
+        // Otherwise just remove text parts to prevent duplicates
         if (msg.role === 'assistant' && state.streamingParts[data.conversationId]) {
-          const nonTextParts = state.streamingParts[data.conversationId].filter(p => p.type !== 'text')
-          if (nonTextParts.length > 0) {
-            newState.streamingParts = { ...state.streamingParts, [data.conversationId]: nonTextParts }
-          } else {
+          if (msg.toolCalls && msg.toolCalls.length > 0) {
             const { [data.conversationId]: _, ...rest } = state.streamingParts
             newState.streamingParts = rest
+          } else {
+            const nonTextParts = state.streamingParts[data.conversationId].filter(p => p.type !== 'text')
+            if (nonTextParts.length > 0) {
+              newState.streamingParts = { ...state.streamingParts, [data.conversationId]: nonTextParts }
+            } else {
+              const { [data.conversationId]: _, ...rest } = state.streamingParts
+              newState.streamingParts = rest
+            }
           }
         }
         return newState

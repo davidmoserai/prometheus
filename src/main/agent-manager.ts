@@ -6,7 +6,7 @@ import { Agent } from '@mastra/core/agent'
 import { createTool } from '@mastra/core/tools'
 import { z } from 'zod'
 import { EmployeeStore } from './store'
-import { ChatAttachment, ChatMessage, Employee, ProviderConfig, Task, TaskMessage, TOOL_IDS } from './types'
+import { ChatAttachment, ChatMessage, Employee, ProviderConfig, Task, TaskMessage, ToolCallRecord, TOOL_IDS } from './types'
 import type { MCPManager } from './mcp-manager'
 import type { ConversationService } from './conversation-service'
 import { runClaudeCode, TOOL_MAP } from './claude-code-runner'
@@ -98,6 +98,24 @@ function buildProviderOptions(provider: ProviderConfig, hasTools: boolean): Reco
 // Tool builders — created dynamically per request via closure
 // ============================================================
 
+// Format a task's status for display in check_task_status results
+function formatTaskStatus(task: Task, store: EmployeeStore): string {
+  const toEmp = store.getEmployee(task.toEmployeeId)
+  const toName = toEmp?.name || 'Unknown'
+  let result = `**Task ${task.id}** — ${task.status.toUpperCase()}\nAssigned to: ${toName}\nObjective: ${task.objective}`
+  if (task.response) {
+    result += `\n\nResponse:\n${task.response.slice(0, 1000)}${task.response.length > 1000 ? '...' : ''}`
+  }
+  const recentMessages = task.messages.slice(-5)
+  if (recentMessages.length > 0) {
+    result += '\n\nRecent activity:'
+    for (const m of recentMessages) {
+      result += `\n- [${m.role}]: ${m.content.slice(0, 200)}`
+    }
+  }
+  return result
+}
+
 function buildMastraTools(
   store: EmployeeStore,
   employee: Employee,
@@ -124,8 +142,6 @@ function buildMastraTools(
       description: 'Delegate a task to another employee. Use this when work should be handled by a team member with the right expertise.',
       inputSchema: z.object({
         to_employee_id: z.string().describe('ID of the employee to delegate to'),
-        priority: z.enum(['high', 'medium', 'low']),
-        deadline: z.string().describe('When the task should be completed'),
         objective: z.string().describe('One sentence: what outcome is required'),
         context: z.string().describe('Minimum context the agent needs'),
         deliverable: z.string().describe('Exact output format expected'),
@@ -138,7 +154,7 @@ function buildMastraTools(
           return { result: "You don't have permission to contact that employee." }
         }
         const toEmp = store.getEmployee(input.to_employee_id)
-        const briefDetail = `To: ${toEmp?.name || 'Unknown'} (${toEmp?.role || 'unknown role'})\nPriority: ${input.priority}\nDeadline: ${input.deadline || 'Not specified'}\n\nObjective:\n${input.objective}\n\nContext:\n${input.context}\n\nDeliverable:\n${input.deliverable}\n\nAcceptance Criteria:\n${input.acceptance_criteria}\n\nEscalate if:\n${input.escalate_if}`
+        const briefDetail = `To: ${toEmp?.name || 'Unknown'} (${toEmp?.role || 'unknown role'})\n\nObjective:\n${input.objective}\n\nContext:\n${input.context}\n\nDeliverable:\n${input.deliverable}\n\nAcceptance Criteria:\n${input.acceptance_criteria}\n\nEscalate if:\n${input.escalate_if}`
         onToolCall?.({ tool: 'delegate_task', summary: `Delegated task to ${toEmp?.name || 'employee'}: ${input.objective}`, detail: briefDetail })
         const { message } = onDelegateTask(employee, input as Record<string, string>, conversationId)
         return { result: message }
@@ -151,7 +167,8 @@ function buildMastraTools(
       description: 'Send a message to another employee and get their response. Use this for quick questions, clarifications, or lightweight collaboration — not for formal task assignments.',
       inputSchema: z.object({
         to_employee_id: z.string().describe('ID of the employee to message'),
-        message: z.string().describe('Your message to them')
+        message: z.string().describe('Your message to them'),
+        task_id: z.string().optional().describe('If messaging about a specific task, include the task ID for context')
       }),
       execute: async (input) => {
         // Validate target employee is in the contactable list
@@ -161,11 +178,41 @@ function buildMastraTools(
         const toEmp = store.getEmployee(input.to_employee_id)
         onToolCall?.({ tool: 'message_employee', summary: `Messaged ${toEmp?.name || 'employee'}: ${input.message.slice(0, 80)}` })
         try {
-          const response = await onMessageEmployee?.(employee, input.to_employee_id, input.message)
+          // Prepend task context if task_id is provided
+          let fullMessage = input.message
+          if (input.task_id) {
+            const task = store.getTask(input.task_id)
+            if (task) {
+              fullMessage = `[Re: Task "${task.objective}" (${task.status})]\n\n${input.message}`
+            }
+          }
+          const response = await onMessageEmployee?.(employee, input.to_employee_id, fullMessage)
           return { result: response || 'No response received.' }
         } catch (err) {
           return { result: `Failed to message employee: ${err instanceof Error ? err.message : 'Unknown error'}` }
         }
+      }
+    })
+
+    // Check task status tool — lets agents query status of delegated tasks
+    tools.check_task_status = createTool({
+      id: 'check_task_status',
+      description: 'Check status of tasks you delegated. Returns status, response, and latest messages.',
+      inputSchema: z.object({
+        task_id: z.string().optional().describe('Specific task ID. If omitted, returns all your active delegated tasks.')
+      }),
+      execute: async (input) => {
+        const allTasks = store.listTasks().filter(t => t.fromEmployeeId === employee.id)
+        if (input.task_id) {
+          const task = allTasks.find(t => t.id === input.task_id)
+          if (!task) return { result: `Task "${input.task_id}" not found or you are not the delegator.` }
+          return { result: formatTaskStatus(task, store) }
+        }
+        // Return all active tasks (pending, in_progress, escalated)
+        const activeTasks = allTasks.filter(t => t.status !== 'completed')
+        if (activeTasks.length === 0) return { result: 'No active delegated tasks.' }
+        const formatted = activeTasks.map(t => formatTaskStatus(t, store)).join('\n\n---\n\n')
+        return { result: formatted }
       }
     })
   }
@@ -468,6 +515,7 @@ export class AgentManager {
   private onApprovalRequest?: (data: { conversationId: string; approvalId: string; tool: string; args: Record<string, unknown>; summary: string }) => void
   private pendingApprovals: Map<string, { resolve: (approved: boolean) => void; timer: ReturnType<typeof setTimeout> }> = new Map()
   private activeAbortControllers: Map<string, AbortController> = new Map()
+  private activeTaskIds = new Set<string>()
   private activeClaudeCodeAborts: Map<string, () => void> = new Map()
 
   constructor(store: EmployeeStore, mcpManager?: MCPManager, convService?: ConversationService) {
@@ -547,6 +595,11 @@ export class AgentManager {
     }
   }
 
+  /** Check if a task is currently being executed */
+  isTaskActive(taskId: string): boolean {
+    return this.activeTaskIds.has(taskId)
+  }
+
   async sendMessage(
     conversationId: string,
     content: string,
@@ -600,10 +653,14 @@ export class AgentManager {
       content: m.content
     }))
 
-    // Build tools via closure
+    // Build tools via closure, collecting tool calls for persistence
+    const collectedToolCalls: ToolCallRecord[] = []
     const contactable = this.getContactableEmployees(employee)
     const toolCallCb = this.onToolCall
-      ? (data: { tool: string; summary: string; detail?: string }) => this.onToolCall?.({ conversationId, ...data })
+      ? (data: { tool: string; summary: string; detail?: string }) => {
+          collectedToolCalls.push({ id: `tc-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, tool: data.tool, summary: data.summary, detail: data.detail })
+          this.onToolCall?.({ conversationId, ...data })
+        }
       : undefined
     const tools = buildMastraTools(
       this.store,
@@ -665,7 +722,11 @@ export class AgentManager {
         )
       }
 
-      const msg = await this.addMessage(conversationId, { role: 'assistant', content: responseText })
+      const msg = await this.addMessage(conversationId, {
+        role: 'assistant',
+        content: responseText,
+        ...(collectedToolCalls.length > 0 ? { toolCalls: collectedToolCalls } : {})
+      })
       onMessageStored?.(msg)
       return msg
     } catch (error) {
@@ -935,8 +996,8 @@ export class AgentManager {
     const task = this.store.createTask({
       fromEmployeeId: fromEmployee.id,
       toEmployeeId: args.to_employee_id,
-      priority: (args.priority || 'medium') as Task['priority'],
-      deadline: args.deadline || '',
+      priority: 'medium' as Task['priority'],
+      deadline: '',
       objective: args.objective,
       context: args.context,
       deliverable: args.deliverable,
@@ -985,7 +1046,7 @@ export class AgentManager {
       if (updated) this.onTaskUpdate?.(updated)
     })
 
-    const message = `Task delegated to **${toName}** (${toEmployee?.role || 'unknown role'}). They're working on it now.\n\n**Objective:** ${args.objective}\n**Priority:** ${args.priority}\n**Deadline:** ${args.deadline || 'Not specified'}`
+    const message = `Task delegated to **${toName}** (task: ${task.id}). They're executing it now. Use check_task_status to monitor progress.\n\n**Objective:** ${args.objective}`
 
     return { task, message }
   }
@@ -1135,6 +1196,15 @@ export class AgentManager {
    * Auto-execute a task: send the Agent Brief to the target employee and capture their response.
    */
   private async executeTask(task: Task, originConversationId?: string): Promise<void> {
+    this.activeTaskIds.add(task.id)
+    try {
+      await this._executeTaskInner(task, originConversationId)
+    } finally {
+      this.activeTaskIds.delete(task.id)
+    }
+  }
+
+  private async _executeTaskInner(task: Task, originConversationId?: string): Promise<void> {
     const toEmployee = this.store.getEmployee(task.toEmployeeId)
     if (!toEmployee) throw new Error('Target employee not found')
 
@@ -1146,13 +1216,21 @@ export class AgentManager {
     if (!provider) throw new Error(`Provider ${toEmployee.provider} not configured`)
     if (!provider.apiKey && provider.id !== 'ollama' && provider.id !== 'claude-code') throw new Error(`No API key for ${provider.name}`)
 
+    // Create a dedicated conversation for this task (gives Claude Code access to tools via internal MCP)
+    if (!task.conversationId && this.convService) {
+      const companyId = this.store.getActiveCompanyId() || ''
+      const conv = await this.convService.createConversation(task.toEmployeeId, companyId)
+      this.store.updateTask(task.id, { conversationId: conv.id })
+      task = { ...task, conversationId: conv.id }
+    }
+
     // Update status to in_progress
     this.store.updateTask(task.id, { status: 'in_progress' })
     const inProgress = this.store.getTask(task.id)
     if (inProgress) this.onTaskUpdate?.(inProgress)
 
     // Build the brief as a user message to the target agent
-    const brief = `AGENT BRIEF\nTo: ${toEmployee.name} (${toEmployee.role})\nFrom: ${fromName}\nPriority: ${task.priority}\nDeadline: ${task.deadline || 'Not specified'}\n\nObjective:\n${task.objective}\n\nContext:\n${task.context}\n\nDeliverable:\n${task.deliverable}\n\nAcceptance Criteria:\n${task.acceptanceCriteria}\n\nEscalate to founder if:\n${task.escalateIf}`
+    const brief = `AGENT BRIEF — EXECUTE NOW\nTo: ${toEmployee.name} (${toEmployee.role})\nFrom: ${fromName}\n\nObjective:\n${task.objective}\n\nContext:\n${task.context}\n\nDeliverable:\n${task.deliverable}\n\nAcceptance Criteria:\n${task.acceptanceCriteria}\n\nEscalate to founder if:\n${task.escalateIf}\n\nIMPORTANT: Do NOT just acknowledge this task. Execute it immediately and produce the deliverable in your response. Use your tools to complete the work now.`
 
     // Build system prompt for target employee
     const systemPrompt = await this.buildSystemPrompt(toEmployee)
@@ -1211,15 +1289,17 @@ export class AgentManager {
       // No threadId passed — task conversations are ephemeral and stored in task.messages, not Mastra memory
       let responseText: string
       if (provider.id === 'claude-code') {
+        console.log(`Task "${task.id}" executing via Claude Code (conversationId: ${task.conversationId || 'NONE'})`)
         responseText = await this.runClaudeCodeAgent(
           toEmployee, systemPrompt, messages, taskStreamCb,
-          undefined,
+          task.conversationId,
           (data: { tool: string; summary: string; detail?: string }) => {
             this.store.addTaskMessage(task.id, { role: 'tool', content: `${data.tool}: ${data.summary}` })
             const current = this.store.getTask(task.id)
             if (current) this.onTaskUpdate?.(current)
-          }
+          },
         )
+        console.log(`Task "${task.id}" Claude Code response (${responseText.length} chars): ${responseText.slice(0, 100)}...`)
       } else {
         responseText = await this.runAgent(
           provider, toEmployee, systemPrompt, messages, taskStreamCb,
@@ -1240,9 +1320,9 @@ export class AgentManager {
         }
       }
 
-      // Save response but keep as in_progress — user reviews and marks complete
+      // Save response
       this.store.updateTask(task.id, {
-        status: 'in_progress',
+        status: 'completed',
         response: responseText
       })
     } catch (err) {
@@ -1254,19 +1334,25 @@ export class AgentManager {
     const updated = this.store.getTask(task.id)
     if (updated) this.onTaskUpdate?.(updated)
 
-    // Notify the delegating agent's conversation with a system message about the result
+    // Inject task result into the delegating agent's conversation and auto-trigger processing
     if (originConversationId && this.convService) {
       try {
         const toName = toEmployee?.name || 'Unknown'
         const status = updated?.status || 'in_progress'
-        const summary = (updated?.response || '').slice(0, 500)
-        const feedbackContent = `[Task Update] Task "${task.objective}" ${status === 'escalated' ? 'was escalated' : 'completed'} by ${toName}.\n\nResponse summary: ${summary}${(updated?.response?.length || 0) > 500 ? '...' : ''}`
-        await this.convService.addMessage(originConversationId, {
-          role: 'system',
-          content: feedbackContent
+        const resultContent = `[Task Result from ${toName}] (task: ${task.id})\nTask: ${task.objective}\nStatus: ${status}\n\nResult:\n${updated?.response || '(no response)'}`
+
+        // Auto-trigger the delegating agent to process the result
+        this.sendMessage(
+          originConversationId,
+          resultContent,
+          () => {},
+          undefined,
+          true // skipApproval — automated callback
+        ).catch(err => {
+          console.error('Failed to auto-continue after task completion:', err)
         })
       } catch {
-        // Non-critical — don't fail the task if feedback message fails
+        // Non-critical — don't fail the task if feedback injection fails
       }
     }
   }
@@ -1275,6 +1361,15 @@ export class AgentManager {
    * Continue a task conversation: add a user reply and run the agent again.
    */
   async continueTask(taskId: string, userMessage: string): Promise<void> {
+    this.activeTaskIds.add(taskId)
+    try {
+      await this._continueTaskInner(taskId, userMessage)
+    } finally {
+      this.activeTaskIds.delete(taskId)
+    }
+  }
+
+  private async _continueTaskInner(taskId: string, userMessage: string): Promise<void> {
     const task = this.store.getTask(taskId)
     if (!task) throw new Error('Task not found')
 
@@ -1294,12 +1389,12 @@ export class AgentManager {
     const fromEmployee = this.store.getEmployee(task.fromEmployeeId)
     const fromName = fromEmployee?.name || 'Unknown'
 
-    const brief = `AGENT BRIEF\nTo: ${toEmployee.name} (${toEmployee.role})\nFrom: ${fromName}\nPriority: ${task.priority}\nDeadline: ${task.deadline || 'Not specified'}\n\nObjective:\n${task.objective}\n\nContext:\n${task.context}\n\nDeliverable:\n${task.deliverable}\n\nAcceptance Criteria:\n${task.acceptanceCriteria}\n\nEscalate to founder if:\n${task.escalateIf}`
+    const brief = `AGENT BRIEF — EXECUTE NOW\nTo: ${toEmployee.name} (${toEmployee.role})\nFrom: ${fromName}\n\nObjective:\n${task.objective}\n\nContext:\n${task.context}\n\nDeliverable:\n${task.deliverable}\n\nAcceptance Criteria:\n${task.acceptanceCriteria}\n\nEscalate to founder if:\n${task.escalateIf}\n\nIMPORTANT: Do NOT just acknowledge this task. Execute it immediately and produce the deliverable in your response. Use your tools to complete the work now.`
 
     const messages: { role: 'user' | 'assistant' | 'system'; content: string }[] = [
       { role: 'user', content: brief },
       ...(updatedTask.messages || [])
-        .filter(m => m.role !== 'tool')
+        .filter(m => m.role !== 'tool' && m.content !== '...')
         .map(m => ({
           role: (m.role === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
           content: m.content
@@ -1366,12 +1461,12 @@ export class AgentManager {
       if (provider.id === 'claude-code') {
         responseText = await this.runClaudeCodeAgent(
           toEmployee, systemPrompt, messages, continueStreamCb,
-          undefined,
+          task.conversationId,
           (data: { tool: string; summary: string; detail?: string }) => {
             this.store.addTaskMessage(taskId, { role: 'tool', content: `${data.tool}: ${data.summary}` })
             const current = this.store.getTask(taskId)
             if (current) this.onTaskUpdate?.(current)
-          }
+          },
         )
       } else {
         responseText = await this.runAgent(
@@ -1474,10 +1569,11 @@ export class AgentManager {
     }
 
     // Task delegation instructions
-    prompt += '\n\nWhen working on a delegated task:'
-    prompt += '\n- If you need more information, use message_employee to ask the sender'
-    prompt += '\n- If you need something only the founder can provide, clearly state what you need — they can reply directly on the task'
-    prompt += '\n- Don\'t produce a half-finished deliverable. Ask first, deliver second.'
+    prompt += '\n\nWhen you receive an AGENT BRIEF:'
+    prompt += '\n- Execute the task IMMEDIATELY. Do not just acknowledge it — produce the deliverable in your response.'
+    prompt += '\n- Use your tools (file writing, web search, code execution, etc.) to complete the work.'
+    prompt += '\n- If you truly cannot proceed without more information, use message_employee to ask the sender.'
+    prompt += '\n- If you need something only the founder can provide, clearly state what you need — they can reply directly on the task.'
 
     return prompt
   }

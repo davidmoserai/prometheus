@@ -34,7 +34,7 @@ interface NotificationPanelProps {
 }
 
 export function NotificationPanel({ onClose }: NotificationPanelProps) {
-  const { notifications, markNotificationRead, markAllNotificationsRead, setActiveView } = useAppStore()
+  const { notifications, tasks, markNotificationRead, markAllNotificationsRead, setActiveView } = useAppStore()
   const panelRef = useRef<HTMLDivElement>(null)
 
   // Close on outside click
@@ -56,6 +56,18 @@ export function NotificationPanel({ onClose }: NotificationPanelProps) {
     // Navigate to tasks page for task-related notifications
     if (notification.type === 'task_completed' || notification.type === 'task_escalated' || notification.type === 'recurring_executed') {
       setActiveView('tasks')
+    }
+
+    // Navigate for tool approval notifications
+    if (notification.type === 'tool_approval') {
+      const convId = notification.metadata?.conversationId
+      // Check if this approval belongs to a task conversation
+      const isTaskApproval = convId && tasks.some(t => t.conversationId === convId)
+      if (isTaskApproval) {
+        setActiveView('tasks')
+      } else {
+        setActiveView('chat')
+      }
     }
     onClose()
   }

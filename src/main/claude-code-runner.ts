@@ -282,12 +282,17 @@ const TOOLS = [
   {
     name: 'delegate_task',
     description: 'Delegate a task to another employee. Use this when work should be handled by a team member with the right expertise. ALWAYS use this tool for task delegation — never just describe what you would delegate.',
-    inputSchema: { type: 'object', properties: { to_employee_id: { type: 'string', description: 'ID of the employee to delegate to' }, priority: { type: 'string', enum: ['high', 'medium', 'low'] }, deadline: { type: 'string', description: 'When the task should be completed' }, objective: { type: 'string', description: 'One sentence: what outcome is required' }, context: { type: 'string', description: 'Minimum context the agent needs' }, deliverable: { type: 'string', description: 'Exact output format expected' }, acceptance_criteria: { type: 'string', description: 'What makes this done correctly' }, escalate_if: { type: 'string', description: "Condition requiring founder's input" } }, required: ['to_employee_id', 'priority', 'objective', 'context', 'deliverable', 'acceptance_criteria', 'escalate_if'] }
+    inputSchema: { type: 'object', properties: { to_employee_id: { type: 'string', description: 'ID of the employee to delegate to' }, objective: { type: 'string', description: 'One sentence: what outcome is required' }, context: { type: 'string', description: 'Minimum context the agent needs' }, deliverable: { type: 'string', description: 'Exact output format expected' }, acceptance_criteria: { type: 'string', description: 'What makes this done correctly' }, escalate_if: { type: 'string', description: "Condition requiring founder's input" } }, required: ['to_employee_id', 'objective', 'context', 'deliverable', 'acceptance_criteria', 'escalate_if'] }
   },
   {
     name: 'message_employee',
     description: 'Send a message to another employee and get their response. Use for quick questions, clarifications, or lightweight collaboration — not for formal task assignments.',
-    inputSchema: { type: 'object', properties: { to_employee_id: { type: 'string', description: 'ID of the employee to message' }, message: { type: 'string', description: 'Your message to them' } }, required: ['to_employee_id', 'message'] }
+    inputSchema: { type: 'object', properties: { to_employee_id: { type: 'string', description: 'ID of the employee to message' }, message: { type: 'string', description: 'Your message to them' }, task_id: { type: 'string', description: 'If messaging about a specific task, include the task ID for context' } }, required: ['to_employee_id', 'message'] }
+  },
+  {
+    name: 'check_task_status',
+    description: 'Check status of tasks you delegated. Returns status, response, and latest messages.',
+    inputSchema: { type: 'object', properties: { task_id: { type: 'string', description: 'Specific task ID. If omitted, returns all your active delegated tasks.' } }, required: [] }
   }
 ]
 
@@ -297,7 +302,8 @@ const URL_MAP = {
   create_knowledge_doc: '/knowledge/create',
   update_knowledge_doc: '/knowledge/update',
   delegate_task: '/task/delegate',
-  message_employee: '/employee/message'
+  message_employee: '/employee/message',
+  check_task_status: '/task/status'
 }
 
 function post(path, body) {
@@ -358,14 +364,21 @@ process.stdin.on('end', () => {
         let r = ''
         res.on('data', c => { r += c })
         res.on('end', () => {
-          try { process.exit(JSON.parse(r).approved ? 0 : 2) } catch { process.exit(0) }
+          try {
+            const approved = JSON.parse(r).approved
+            process.stderr.write(approved ? 'approved' : 'denied')
+            process.exit(approved ? 0 : 2)
+          } catch {
+            process.stderr.write('approved')
+            process.exit(0)
+          }
         })
       }
     )
-    req.on('error', () => process.exit(0))
+    req.on('error', () => { process.stderr.write('approved'); process.exit(0) })
     req.write(body)
     req.end()
-  } catch { process.exit(0) }
+  } catch { process.stderr.write('approved'); process.exit(0) }
 })
 `
   const hookPath = join(tempDir, 'hook.js')
@@ -439,7 +452,8 @@ export function runClaudeCode(options: RunOptions): { promise: Promise<string>; 
       'mcp__prometheus-internal__update_knowledge_doc',
       ...(options.hasDelegationTools ? [
         'mcp__prometheus-internal__delegate_task',
-        'mcp__prometheus-internal__message_employee'
+        'mcp__prometheus-internal__message_employee',
+        'mcp__prometheus-internal__check_task_status'
       ] : [])
     ] : []
 

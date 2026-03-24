@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { Send, Square, Plus, MessageSquare, ChevronLeft, ChevronDown, Users, ArrowRight, Trash2, Minimize2, FileText, Download, Paperclip, X, Brain, Terminal, Search, Globe, Edit3, Code, ShieldAlert, Check, XIcon } from 'lucide-react'
+import { Plus, MessageSquare, ChevronLeft, ChevronDown, Users, ArrowRight, Trash2, Minimize2, FileText, Download, Paperclip, X, Brain, Terminal, Search, Globe, Edit3, Code, ShieldAlert, Check, XIcon } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Button } from '@/components/ui/button'
+import { ChatTextarea, SendButton, StopButton } from '@/components/ui/chat-input'
 import { Badge } from '@/components/ui/badge'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useAppStore, type Conversation, type ChatMessage, type ChatAttachment, type StreamPart } from '@/stores/app-store'
@@ -682,34 +683,21 @@ export function ChatPage() {
                   <Paperclip className="w-4 h-4" />
                 </button>
                 <div className="flex-1 relative">
-                  <textarea
+                  <ChatTextarea
                     ref={inputRef}
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={handleKeyDown}
                     placeholder={`Message ${selectedEmployee?.name}...`}
-                    rows={1}
-                    className="flex w-full rounded-2xl border border-border-default bg-bg-tertiary text-[14px] text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-flame-500/25 focus:border-flame-500/40 transition-all duration-300 resize-none leading-relaxed"
-                    style={{ minHeight: '48px', maxHeight: '120px', padding: '14px 48px 14px 20px' }}
                   />
                 </div>
                 {isSending ? (
-                  <button
-                    onClick={handleStop}
-                    className="shrink-0 h-[48px] w-[48px] rounded-2xl flex items-center justify-center bg-bg-elevated border border-border-default hover:border-flame-500/50 hover:bg-flame-500/10 transition-all cursor-pointer"
-                    title="Stop generating"
-                  >
-                    <Square className="w-4 h-4 text-flame-400 fill-flame-400" />
-                  </button>
+                  <StopButton onClick={handleStop} />
                 ) : (
-                  <Button
-                    size="icon"
+                  <SendButton
                     onClick={handleSend}
                     disabled={!input.trim() && stagedAttachments.length === 0}
-                    className="shrink-0 h-[48px] w-[48px] rounded-2xl"
-                  >
-                    <Send className="w-4 h-4" />
-                  </Button>
+                  />
                 )}
               </div>
             </div>

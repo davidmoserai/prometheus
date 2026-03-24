@@ -6,12 +6,16 @@ import { RecurringTask } from './types'
 /**
  * Scheduler checks recurring tasks every 60 seconds and executes any that are due.
  */
+const STUCK_TASK_THRESHOLD_MS = 5 * 60 * 1000 // 5 minutes
+const MAX_RETRIES = 2
+
 export class Scheduler {
   private intervalId: NodeJS.Timeout | null = null
   private store: EmployeeStore
   private agentManager: AgentManager
   private convService?: ConversationService
   private onTaskRun?: (task: RecurringTask) => void
+  private taskRetries = new Map<string, number>()
 
   constructor(store: EmployeeStore, agentManager: AgentManager, convService?: ConversationService) {
     this.store = store
@@ -39,13 +43,56 @@ export class Scheduler {
   }
 
   private async checkAndRun() {
-    const tasks = this.store.listRecurringTasks()
+    // Check recurring tasks
+    const recurringTasks = this.store.listRecurringTasks()
     const now = new Date()
-
-    for (const task of tasks) {
+    for (const task of recurringTasks) {
       if (!task.enabled) continue
       if (new Date(task.nextRunAt) <= now) {
         await this.executeRecurringTask(task)
+      }
+    }
+
+    // Recover stuck delegated tasks
+    await this.recoverStuckTasks()
+  }
+
+  private async recoverStuckTasks() {
+    const tasks = this.store.listTasks()
+    const now = Date.now()
+
+    for (const task of tasks) {
+      // Only recover tasks that should be active
+      if (task.status !== 'in_progress' && task.status !== 'pending') continue
+
+      // Skip if actively being worked on
+      if (this.agentManager.isTaskActive(task.id)) continue
+
+      // Skip if recently updated (not stale yet)
+      const elapsed = now - new Date(task.updatedAt).getTime()
+      if (elapsed < STUCK_TASK_THRESHOLD_MS) continue
+
+      // Check retry count
+      const retries = this.taskRetries.get(task.id) || 0
+      if (retries >= MAX_RETRIES) {
+        console.log(`Task "${task.id}" exceeded ${MAX_RETRIES} retries, escalating`)
+        this.store.updateTask(task.id, { status: 'escalated' })
+        this.taskRetries.delete(task.id)
+        continue
+      }
+
+      // Re-trigger the stuck task
+      console.log(`Recovering stuck task "${task.id}" (attempt ${retries + 1}/${MAX_RETRIES})`)
+      this.taskRetries.set(task.id, retries + 1)
+      try {
+        await this.agentManager.continueTask(
+          task.id,
+          'Your previous attempt did not complete. Please execute the task now and produce the deliverable.'
+        )
+        // Success — reset retry counter
+        this.taskRetries.delete(task.id)
+      } catch (err) {
+        console.error(`Failed to recover task "${task.id}":`, err)
       }
     }
   }
