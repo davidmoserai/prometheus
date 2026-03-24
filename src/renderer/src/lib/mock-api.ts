@@ -416,7 +416,7 @@ export function installMockApi() {
       }
     },
     chat: {
-      send: async (conversationId: string, message: string) => {
+      send: async (conversationId: string, message: string, _attachments?: unknown[]) => {
         const active = getActive()
         const conv = active.conversations.find(c => c.id === conversationId)
         if (!conv) return

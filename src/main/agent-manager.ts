@@ -6,7 +6,7 @@ import { Agent } from '@mastra/core/agent'
 import { createTool } from '@mastra/core/tools'
 import { z } from 'zod'
 import { EmployeeStore } from './store'
-import { ChatMessage, Employee, ProviderConfig, Task, TaskMessage, TOOL_IDS } from './types'
+import { ChatAttachment, ChatMessage, Employee, ProviderConfig, Task, TaskMessage, TOOL_IDS } from './types'
 import type { MCPManager } from './mcp-manager'
 import type { ConversationService } from './conversation-service'
 import { runClaudeCode, TOOL_MAP } from './claude-code-runner'
@@ -114,6 +114,9 @@ function buildMastraTools(
     employee.tools.filter(t => t.enabled && t.source === 'builtin').map(t => t.id)
   )
 
+  // Capture contactable IDs for runtime validation in tool execute closures
+  const contactableIds = new Set(contactable.map(e => e.id))
+
   // Delegation tool (only if employee can contact others)
   if (contactable.length > 0) {
     tools.delegate_task = createTool({
@@ -130,6 +133,10 @@ function buildMastraTools(
         escalate_if: z.string().describe("Condition requiring founder's input")
       }),
       execute: async (input) => {
+        // Validate target employee is in the contactable list
+        if (!contactableIds.has(input.to_employee_id)) {
+          return { result: "You don't have permission to contact that employee." }
+        }
         const toEmp = store.getEmployee(input.to_employee_id)
         const briefDetail = `To: ${toEmp?.name || 'Unknown'} (${toEmp?.role || 'unknown role'})\nPriority: ${input.priority}\nDeadline: ${input.deadline || 'Not specified'}\n\nObjective:\n${input.objective}\n\nContext:\n${input.context}\n\nDeliverable:\n${input.deliverable}\n\nAcceptance Criteria:\n${input.acceptance_criteria}\n\nEscalate if:\n${input.escalate_if}`
         onToolCall?.({ tool: 'delegate_task', summary: `Delegated task to ${toEmp?.name || 'employee'}: ${input.objective}`, detail: briefDetail })
@@ -147,6 +154,10 @@ function buildMastraTools(
         message: z.string().describe('Your message to them')
       }),
       execute: async (input) => {
+        // Validate target employee is in the contactable list
+        if (!contactableIds.has(input.to_employee_id)) {
+          return { result: "You don't have permission to contact that employee." }
+        }
         const toEmp = store.getEmployee(input.to_employee_id)
         onToolCall?.({ tool: 'message_employee', summary: `Messaged ${toEmp?.name || 'employee'}: ${input.message.slice(0, 80)}` })
         try {
@@ -541,10 +552,15 @@ export class AgentManager {
     content: string,
     onStream: (chunk: string) => void,
     onMessageStored?: (msg: ChatMessage) => void,
-    skipApproval = false
+    skipApproval = false,
+    attachments?: ChatAttachment[]
   ): Promise<ChatMessage> {
     // Store user message via conversation service and notify frontend immediately
-    const userMsg = await this.addMessage(conversationId, { role: 'user', content })
+    const userMsg = await this.addMessage(conversationId, {
+      role: 'user',
+      content,
+      ...(attachments?.length ? { attachments } : {})
+    })
     onMessageStored?.(userMsg)
 
     const conversation = await this.getConversation(conversationId)
@@ -578,8 +594,11 @@ export class AgentManager {
     let mem: Memory | undefined
     try { mem = getMemory() } catch { /* unavailable */ }
 
-    // Only pass latest user message — Mastra retrieves history from LibSQL via threadId
-    const messages: { role: 'user' | 'assistant' | 'system'; content: string }[] = [{ role: 'user', content }]
+    // Build full conversation history for the agent (Mastra doesn't auto-retrieve via threadId since we don't pass one)
+    const messages: { role: 'user' | 'assistant' | 'system'; content: string }[] = conversation.messages.map((m: ChatMessage) => ({
+      role: m.role as 'user' | 'assistant' | 'system',
+      content: m.content
+    }))
 
     // Build tools via closure
     const contactable = this.getContactableEmployees(employee)
@@ -931,7 +950,7 @@ export class AgentManager {
     this.onTaskUpdate?.(task)
 
     // Auto-execute: send brief to target agent in background
-    this.executeTask(task).catch(err => {
+    this.executeTask(task, conversationId).catch(err => {
       console.error('Task auto-execution failed:', err)
       this.store.updateTask(task.id, {
         status: 'escalated',
@@ -975,24 +994,42 @@ export class AgentManager {
     // Build system prompt for target employee
     const systemPrompt = await this.buildSystemPrompt(toEmployee)
 
-    // Only pass latest message — Mastra retrieves history via threadId
-    const messages: { role: 'user' | 'assistant' | 'system'; content: string }[] = [
-      { role: 'user', content: `[From ${fromEmployee.name}]: ${message}` }
-    ]
-
-    // Run target agent with no tools (simple response)
+    // Get Mastra memory instance (if available)
     let mem: Memory | undefined
     try { mem = getMemory() } catch { /* unavailable */ }
+
+    // Build tools for the target agent so it can use its assigned capabilities
+    const targetContactable = this.getContactableEmployees(toEmployee)
+    const targetTools = buildMastraTools(
+      this.store,
+      toEmployee,
+      conv.id,
+      targetContactable,
+      (fromEmp, args, convId) => this.handleDelegateTask(fromEmp, args, convId),
+      (fromEmp, toId, msg) => this.executeAgentMessage(fromEmp, toId, msg),
+      undefined,
+      this.onFileWritten,
+      mem
+    )
+    const allTargetTools = await this.mergeEmployeeMcpTools(toEmployee, targetTools)
+
+    // Build full conversation history for the target agent
+    const fullConv = await this.getConversation(conv.id)
+    const messages: { role: 'user' | 'assistant' | 'system'; content: string }[] = (fullConv?.messages || []).map((m: ChatMessage) => ({
+      role: m.role as 'user' | 'assistant' | 'system',
+      content: m.content
+    }))
+
+    // Run target agent with its tools
     let responseText: string
     if (provider.id === 'claude-code') {
-      const fullConv = await this.getConversation(conv.id)
-      const fullMessages = (fullConv?.messages || []).map((m: ChatMessage) => ({
-        role: m.role as 'user' | 'assistant' | 'system',
-        content: m.content
-      }))
-      responseText = await this.runClaudeCodeAgent(toEmployee, systemPrompt, fullMessages, () => {})
+      responseText = await this.runClaudeCodeAgent(toEmployee, systemPrompt, messages, () => {})
     } else {
-      responseText = await this.runAgent(provider, toEmployee, systemPrompt, messages, () => {}, undefined, mem)
+      responseText = await this.runAgent(
+        provider, toEmployee, systemPrompt, messages, () => {},
+        Object.keys(allTargetTools).length > 0 ? allTargetTools : undefined,
+        mem
+      )
     }
 
     // Store the response
@@ -1072,7 +1109,7 @@ export class AgentManager {
   /**
    * Auto-execute a task: send the Agent Brief to the target employee and capture their response.
    */
-  private async executeTask(task: Task): Promise<void> {
+  private async executeTask(task: Task, originConversationId?: string): Promise<void> {
     const toEmployee = this.store.getEmployee(task.toEmployeeId)
     if (!toEmployee) throw new Error('Target employee not found')
 
@@ -1122,15 +1159,27 @@ export class AgentManager {
     if (currentTask) this.onTaskUpdate?.(currentTask)
 
     try {
-      const taskStreamCb = (accumulated: string) => {
+      // Throttled streaming callback — accumulates text, saves at most every 500ms
+      let taskAccumulated = ''
+      let taskThrottleTimer: ReturnType<typeof setTimeout> | null = null
+      const flushTaskStream = () => {
         const t = this.store.getTask(task.id)
         if (t) {
           const msgIdx = t.messages.findIndex(m => m.id === liveMsg.id)
           if (msgIdx >= 0) {
-            t.messages[msgIdx].content = accumulated
+            t.messages[msgIdx].content = taskAccumulated
             this.store.updateTask(task.id, { messages: t.messages })
             this.onTaskUpdate?.(t)
           }
+        }
+      }
+      const taskStreamCb = (chunk: string) => {
+        taskAccumulated += chunk
+        if (!taskThrottleTimer) {
+          taskThrottleTimer = setTimeout(() => {
+            taskThrottleTimer = null
+            flushTaskStream()
+          }, 500)
         }
       }
 
@@ -1152,6 +1201,9 @@ export class AgentManager {
           Object.keys(taskTools).length > 0 ? taskTools : undefined
         )
       }
+
+      // Clear any pending throttle timer and do a final flush
+      if (taskThrottleTimer) clearTimeout(taskThrottleTimer)
 
       // Finalize the live message with complete text
       const finalTask = this.store.getTask(task.id)
@@ -1176,6 +1228,22 @@ export class AgentManager {
 
     const updated = this.store.getTask(task.id)
     if (updated) this.onTaskUpdate?.(updated)
+
+    // Notify the delegating agent's conversation with a system message about the result
+    if (originConversationId && this.convService) {
+      try {
+        const toName = toEmployee?.name || 'Unknown'
+        const status = updated?.status || 'in_progress'
+        const summary = (updated?.response || '').slice(0, 500)
+        const feedbackContent = `[Task Update] Task "${task.objective}" ${status === 'escalated' ? 'was escalated' : 'completed'} by ${toName}.\n\nResponse summary: ${summary}${(updated?.response?.length || 0) > 500 ? '...' : ''}`
+        await this.convService.addMessage(originConversationId, {
+          role: 'system',
+          content: feedbackContent
+        })
+      } catch {
+        // Non-critical — don't fail the task if feedback message fails
+      }
+    }
   }
 
   /**
@@ -1245,15 +1313,27 @@ export class AgentManager {
     if (ct) this.onTaskUpdate?.(ct)
 
     try {
-      const continueStreamCb = (accumulated: string) => {
+      // Throttled streaming callback — accumulates text, saves at most every 500ms
+      let contAccumulated = ''
+      let contThrottleTimer: ReturnType<typeof setTimeout> | null = null
+      const flushContStream = () => {
         const t = this.store.getTask(taskId)
         if (t) {
           const msgIdx = t.messages.findIndex(m => m.id === continueMsg.id)
           if (msgIdx >= 0) {
-            t.messages[msgIdx].content = accumulated
+            t.messages[msgIdx].content = contAccumulated
             this.store.updateTask(taskId, { messages: t.messages })
             this.onTaskUpdate?.(t)
           }
+        }
+      }
+      const continueStreamCb = (chunk: string) => {
+        contAccumulated += chunk
+        if (!contThrottleTimer) {
+          contThrottleTimer = setTimeout(() => {
+            contThrottleTimer = null
+            flushContStream()
+          }, 500)
         }
       }
 
@@ -1274,6 +1354,9 @@ export class AgentManager {
           Object.keys(taskTools).length > 0 ? taskTools : undefined
         )
       }
+
+      // Clear any pending throttle timer and do a final flush
+      if (contThrottleTimer) clearTimeout(contThrottleTimer)
 
       // Finalize the live message
       const ft = this.store.getTask(taskId)

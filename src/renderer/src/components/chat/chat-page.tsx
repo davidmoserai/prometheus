@@ -171,7 +171,7 @@ export function ChatPage() {
     if (!convId) return
 
     setExpandedToolCalls(new Set())
-    await sendMessage(convId, msg)
+    await sendMessage(convId, msg, attachmentsToSend.length > 0 ? attachmentsToSend : undefined)
     inputRef.current?.focus()
   }
 
