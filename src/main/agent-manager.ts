@@ -1296,7 +1296,9 @@ export class AgentManager {
             this.store.addTaskMessage(task.id, { role: 'tool', content: `${data.tool}: ${data.summary}` })
             const current = this.store.getTask(task.id)
             if (current) this.onTaskUpdate?.(current)
-          }
+          },
+          undefined, // onFileWritten
+          true // skipApproval — user already approved the delegation
         )
       } else {
         responseText = await this.runAgent(
@@ -1464,7 +1466,9 @@ export class AgentManager {
             this.store.addTaskMessage(taskId, { role: 'tool', content: `${data.tool}: ${data.summary}` })
             const current = this.store.getTask(taskId)
             if (current) this.onTaskUpdate?.(current)
-          }
+          },
+          undefined, // onFileWritten
+          true // skipApproval — user already approved the delegation
         )
       } else {
         responseText = await this.runAgent(
