@@ -141,7 +141,14 @@ function registerIpcHandlers(): void {
   ipcMain.handle('tasks:get', (_event, id: string) => store.getTask(id))
   ipcMain.handle('tasks:create', (_event, data) => store.createTask(data))
   ipcMain.handle('tasks:update', (_event, id: string, data) => store.updateTask(id, data))
-  ipcMain.handle('tasks:delete', (_event, id: string) => store.deleteTask(id))
+  ipcMain.handle('tasks:delete', (_event, id: string) => {
+    // Abort any active agent execution for this task
+    const task = store.getTask(id)
+    if (task?.conversationId) {
+      agentManager.abortStream(task.conversationId)
+    }
+    return store.deleteTask(id)
+  })
   ipcMain.handle('tasks:reply', async (_event, taskId: string, message: string) => {
     await agentManager.continueTask(taskId, message)
     return store.getTask(taskId)
