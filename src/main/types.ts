@@ -165,6 +165,7 @@ export interface Task {
   escalateIf: string
   status: 'pending' | 'in_progress' | 'completed' | 'escalated'
   response?: string
+  conversationId?: string
   messages: TaskMessage[]
   createdAt: string
   updatedAt: string

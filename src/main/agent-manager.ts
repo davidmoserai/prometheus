@@ -1216,6 +1216,14 @@ export class AgentManager {
     if (!provider) throw new Error(`Provider ${toEmployee.provider} not configured`)
     if (!provider.apiKey && provider.id !== 'ollama' && provider.id !== 'claude-code') throw new Error(`No API key for ${provider.name}`)
 
+    // Create a dedicated conversation for this task (gives Claude Code access to tools via internal MCP)
+    if (!task.conversationId && this.convService) {
+      const companyId = this.store.getActiveCompanyId() || ''
+      const conv = await this.convService.createConversation(task.toEmployeeId, companyId)
+      this.store.updateTask(task.id, { conversationId: conv.id })
+      task = { ...task, conversationId: conv.id }
+    }
+
     // Update status to in_progress
     this.store.updateTask(task.id, { status: 'in_progress' })
     const inProgress = this.store.getTask(task.id)
@@ -1283,7 +1291,7 @@ export class AgentManager {
       if (provider.id === 'claude-code') {
         responseText = await this.runClaudeCodeAgent(
           toEmployee, systemPrompt, messages, taskStreamCb,
-          undefined,
+          task.conversationId,
           (data: { tool: string; summary: string; detail?: string }) => {
             this.store.addTaskMessage(task.id, { role: 'tool', content: `${data.tool}: ${data.summary}` })
             const current = this.store.getTask(task.id)
@@ -1451,7 +1459,7 @@ export class AgentManager {
       if (provider.id === 'claude-code') {
         responseText = await this.runClaudeCodeAgent(
           toEmployee, systemPrompt, messages, continueStreamCb,
-          undefined,
+          task.conversationId,
           (data: { tool: string; summary: string; detail?: string }) => {
             this.store.addTaskMessage(taskId, { role: 'tool', content: `${data.tool}: ${data.summary}` })
             const current = this.store.getTask(taskId)
