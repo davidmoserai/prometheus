@@ -21,6 +21,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { ToolApprovalCard } from '@/components/ui/tool-approval-card'
+import { AgentWorkingIndicator } from '@/components/ui/agent-working-indicator'
 import { useAppStore, type Task, type RecurringTask } from '@/stores/app-store'
 
 const STATUS_CONFIG = {
@@ -78,7 +79,8 @@ export function TasksPage() {
     respondToApproval,
     createRecurringTask,
     updateRecurringTask,
-    deleteRecurringTask
+    deleteRecurringTask,
+    stopMessage
   } = useAppStore()
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null)
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
@@ -585,7 +587,7 @@ export function TasksPage() {
                                   <div style={{ marginTop: '16px', marginBottom: '20px' }}>
                                     <p className="text-[12px] font-medium text-text-tertiary uppercase tracking-wider" style={{ marginBottom: '12px' }}>Activity</p>
                                     <div className="flex flex-col" style={{ gap: '8px' }}>
-                                      {task.messages.map((msg) => (
+                                      {task.messages.filter(msg => msg.content !== '...').map((msg) => (
                                         <div key={msg.id} className={`rounded-lg ${
                                           msg.role === 'tool' ? 'bg-white/[0.02]' : msg.role === 'user' ? 'bg-flame-500/[0.06] border border-flame-500/15' : 'bg-bg-tertiary border border-border-default'
                                         }`} style={{ padding: '10px 14px' }}>
@@ -603,23 +605,14 @@ export function TasksPage() {
                                           <p className={`text-[13px] ${msg.role === 'tool' ? 'text-text-tertiary' : 'text-text-primary'} whitespace-pre-wrap`}>{msg.content}</p>
                                         </div>
                                       ))}
-                                      {/* Thinking indicator while agent is working */}
-                                      {isReplying && expandedTaskId === task.id && (
+                                      {/* Working indicator with stop button */}
+                                      {((isReplying && expandedTaskId === task.id) || (task.status === 'in_progress' && task.messages.length > 0 && task.messages[task.messages.length - 1]?.content === '...')) && (
                                         <div className="rounded-lg bg-bg-tertiary border border-border-default" style={{ padding: '10px 14px' }}>
-                                          <div className="flex items-center" style={{ gap: '6px', marginBottom: '4px' }}>
-                                            <Bot className="w-3 h-3 text-sky-400" />
-                                            <span className="text-[11px] text-text-tertiary">
-                                              {employees.find(e => e.id === task.toEmployeeId)?.name || 'Agent'}
-                                            </span>
-                                          </div>
-                                          <div className="flex items-center" style={{ gap: '6px' }}>
-                                            <div className="flex" style={{ gap: '4px' }}>
-                                              <span className="w-1.5 h-1.5 rounded-full bg-text-tertiary" style={{ animation: 'pulse-dot 1.4s ease-in-out infinite', animationDelay: '0s' }} />
-                                              <span className="w-1.5 h-1.5 rounded-full bg-text-tertiary" style={{ animation: 'pulse-dot 1.4s ease-in-out infinite', animationDelay: '0.2s' }} />
-                                              <span className="w-1.5 h-1.5 rounded-full bg-text-tertiary" style={{ animation: 'pulse-dot 1.4s ease-in-out infinite', animationDelay: '0.4s' }} />
-                                            </div>
-                                            <span className="text-[12px] text-text-tertiary">Working...</span>
-                                          </div>
+                                          <AgentWorkingIndicator
+                                            agentName={employees.find(e => e.id === task.toEmployeeId)?.name}
+                                            onStop={task.conversationId ? () => stopMessage(task.conversationId!) : undefined}
+                                            size="sm"
+                                          />
                                         </div>
                                       )}
                                       {/* Pending tool approvals for this task */}

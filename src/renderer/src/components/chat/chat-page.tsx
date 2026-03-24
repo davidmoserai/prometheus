@@ -5,6 +5,7 @@ import remarkGfm from 'remark-gfm'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { ToolApprovalCard } from '@/components/ui/tool-approval-card'
+import { AgentWorkingIndicator } from '@/components/ui/agent-working-indicator'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useAppStore, type Conversation, type ChatMessage, type ChatAttachment, type StreamPart } from '@/stores/app-store'
 
@@ -534,16 +535,10 @@ export function ChatPage() {
                       }
                       return null
                     })}
-                    {/* Inline thinking dots — shown when agent is working but no text yet */}
+                    {/* Thinking indicator — shown when agent is working but no text yet */}
                     {isSending && !hasStreamingText && (
                       <div className="rounded-2xl rounded-tl-lg bg-bg-elevated border border-border-default" style={{ padding: '12px 16px' }}>
-                        <div className="flex items-center" style={{ gap: '6px' }}>
-                          <div className="flex" style={{ gap: '4px' }}>
-                            <span className="w-2 h-2 rounded-full bg-text-tertiary" style={{ animation: 'pulse-dot 1.4s ease-in-out infinite', animationDelay: '0s' }} />
-                            <span className="w-2 h-2 rounded-full bg-text-tertiary" style={{ animation: 'pulse-dot 1.4s ease-in-out infinite', animationDelay: '0.2s' }} />
-                            <span className="w-2 h-2 rounded-full bg-text-tertiary" style={{ animation: 'pulse-dot 1.4s ease-in-out infinite', animationDelay: '0.4s' }} />
-                          </div>
-                        </div>
+                        <AgentWorkingIndicator />
                       </div>
                     )}
                   </div>
