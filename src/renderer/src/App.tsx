@@ -37,7 +37,7 @@ export default function App() {
     const unsub = window.api.chat.onStream((data) => {
       useAppStore.getState().appendStreamText(data.conversationId, data.chunk)
     })
-    return unsub
+    return () => { unsub() }
   }, [])
 
   // Set up tool call listener (chronological inline rendering)
@@ -53,7 +53,7 @@ export default function App() {
         status: 'done'
       })
     })
-    return unsub
+    return () => { unsub() }
   }, [])
 
   // Set up file written listener (inline rendering with images)
@@ -66,7 +66,7 @@ export default function App() {
         content: data.content
       })
     })
-    return unsub
+    return () => { unsub() }
   }, [])
 
   // Set up tool approval request listener
@@ -87,7 +87,7 @@ export default function App() {
         body: `${data.tool} requires your approval`
       })
     })
-    return unsub
+    return () => { unsub() }
   }, [])
 
   // Set up message stored listener (backend confirms user/assistant messages)
@@ -117,7 +117,7 @@ export default function App() {
         return newState
       })
     })
-    return unsub
+    return () => { unsub() }
   }, [])
 
   // Set up task update listener (real-time updates from background task execution)
@@ -126,7 +126,7 @@ export default function App() {
     const unsub = window.api.tasks.onUpdate(() => {
       useAppStore.getState().loadTasks()
     })
-    return unsub
+    return () => { unsub() }
   }, [])
 
   // Set up recurring task executed listener
@@ -136,7 +136,7 @@ export default function App() {
       useAppStore.getState().loadRecurringTasks()
       useAppStore.getState().loadTasks()
     })
-    return unsub
+    return () => { unsub() }
   }, [])
 
   // Set up notification listener from main process
@@ -149,7 +149,7 @@ export default function App() {
         body: data.body
       })
     })
-    return unsub
+    return () => { unsub() }
   }, [])
 
   // Listen for MCP server status changes (health check failures, idle disconnects)
@@ -168,7 +168,7 @@ export default function App() {
         useAppStore.getState().loadMcpServers()
       }
     })
-    return unsub
+    return () => { unsub() }
   }, [])
 
   // Listen for auto-update downloaded event
@@ -177,7 +177,7 @@ export default function App() {
     const unsub = window.api.updates.onDownloaded(() => {
       setUpdateReady(true)
     })
-    return unsub
+    return () => { unsub() }
   }, [])
 
   const renderView = () => {

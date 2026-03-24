@@ -123,6 +123,10 @@ const api = {
     getWorkingMemory: (employeeId: string) => ipcRenderer.invoke('memory:getWorkingMemory', employeeId),
     clearWorkingMemory: (employeeId: string) => ipcRenderer.invoke('memory:clearWorkingMemory', employeeId)
   },
+  native: {
+    list: () => ipcRenderer.invoke('native:list'),
+    toggle: (id: string, enabled: boolean) => ipcRenderer.invoke('native:toggle', id, enabled)
+  },
   mcp: {
     list: () => ipcRenderer.invoke('mcp:list'),
     add: (config: unknown) => ipcRenderer.invoke('mcp:add', config),

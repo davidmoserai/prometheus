@@ -62,19 +62,33 @@ export interface MCPServerConfig {
   url?: string
   headers?: Record<string, string>
   isComposio?: boolean
+  isNative?: boolean
 }
 
-export const DEFAULT_MCP_SERVERS: MCPServerConfig[] = [
+// Native integrations bundled with Prometheus (users toggle on/off, no config needed)
+export interface NativeIntegration {
+  id: string
+  name: string
+  description: string
+  icon: string
+  config: Omit<MCPServerConfig, 'id' | 'name' | 'enabled'>
+}
+
+export const NATIVE_INTEGRATIONS: NativeIntegration[] = [
   {
-    id: 'yfnhanced-yahoo-finance',
+    id: 'yahoo-finance',
     name: 'Yahoo Finance',
-    command: 'npx',
-    args: ['-y', 'yfnhanced-mcp'],
-    enabled: false,
-    githubUrl: 'https://github.com/kanishka-namdeo/yfnhanced-mcp',
-    isDefault: true
+    description: 'Real-time quotes, historical data, earnings, financials, news, and company profiles',
+    icon: '📈',
+    config: {
+      command: 'node',
+      args: ['PROMETHEUS_APP_PATH/packages/yahoo-finance-mcp/dist/index.js'],
+      isNative: true
+    }
   }
 ]
+
+export const DEFAULT_MCP_SERVERS: MCPServerConfig[] = []
 
 export interface PermissionSet {
   canBrowseWeb: boolean
@@ -168,6 +182,7 @@ export interface AppSettings {
   defaultModel: string
   theme: 'dark' | 'light'
   mcpServers: MCPServerConfig[]
+  enabledNativeIntegrations?: string[]
   composioApiKey?: string
 }
 
