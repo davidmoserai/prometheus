@@ -1297,8 +1297,6 @@ export class AgentManager {
             const current = this.store.getTask(task.id)
             if (current) this.onTaskUpdate?.(current)
           },
-          undefined, // onFileWritten
-          true // skipApproval — user already approved the delegation
         )
       } else {
         responseText = await this.runAgent(
@@ -1467,8 +1465,6 @@ export class AgentManager {
             const current = this.store.getTask(taskId)
             if (current) this.onTaskUpdate?.(current)
           },
-          undefined, // onFileWritten
-          true // skipApproval — user already approved the delegation
         )
       } else {
         responseText = await this.runAgent(

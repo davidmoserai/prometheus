@@ -73,7 +73,9 @@ export default function App() {
   useEffect(() => {
     if (!window.api?.chat?.onApprovalRequest) return
     const unsub = window.api.chat.onApprovalRequest((data) => {
-      useAppStore.getState().appendStreamPart(data.conversationId, {
+      const store = useAppStore.getState()
+      // Add to streaming parts (for chat page inline rendering)
+      store.appendStreamPart(data.conversationId, {
         type: 'tool_approval',
         approvalId: data.approvalId,
         tool: data.tool,
@@ -81,10 +83,19 @@ export default function App() {
         summary: data.summary,
         status: 'pending'
       })
-      useAppStore.getState().addNotification({
+      // Add to global pending approvals (accessible from any page)
+      store.addPendingApproval({
+        approvalId: data.approvalId,
+        tool: data.tool,
+        args: data.args,
+        summary: data.summary,
+        conversationId: data.conversationId
+      })
+      store.addNotification({
         type: 'tool_approval',
         title: 'Tool Approval Needed',
-        body: `${data.tool} requires your approval`
+        body: `${data.tool} requires your approval`,
+        metadata: { conversationId: data.conversationId }
       })
     })
     return () => { unsub() }

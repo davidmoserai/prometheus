@@ -148,6 +148,7 @@ interface Task {
   escalateIf: string
   status: 'pending' | 'in_progress' | 'completed' | 'escalated'
   response?: string
+  conversationId?: string
   messages: TaskMessage[]
   createdAt: string
   updatedAt: string
@@ -183,6 +184,16 @@ interface AppNotification {
   body: string
   read: boolean
   timestamp: string
+  metadata?: Record<string, string>
+}
+
+export interface PendingApproval {
+  approvalId: string
+  tool: string
+  args: Record<string, unknown>
+  summary: string
+  status: 'pending' | 'approved' | 'rejected'
+  conversationId: string
 }
 
 interface AppSettings {
@@ -221,6 +232,9 @@ interface AppState {
   composioApiKeySet: boolean
   composioConnectedApps: Record<string, boolean> // appId -> connected
 
+  // Pending approvals (global, accessible from any page)
+  pendingApprovals: PendingApproval[]
+
   // UI State
   activeView: 'dashboard' | 'employees' | 'chat' | 'knowledge' | 'tasks' | 'settings'
   selectedEmployeeId: string | null
@@ -243,6 +257,7 @@ interface AppState {
   appendStreamText: (convId: string, delta: string) => void
   appendStreamPart: (convId: string, part: StreamPart) => void
   clearStreamingParts: (convId: string) => void
+  addPendingApproval: (data: Omit<PendingApproval, 'status'>) => void
   respondToApproval: (approvalId: string, approved: boolean) => void
 
   // Actions — Companies
@@ -334,6 +349,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   notifications: [],
   mcpServers: [],
   mcpToolNames: {},
+  pendingApprovals: [],
   composioApiKeySet: false,
   composioConnectedApps: {},
   settings: null,
@@ -386,18 +402,28 @@ export const useAppStore = create<AppState>((set, get) => ({
       const { [convId]: _, ...rest } = state.streamingParts
       return { streamingParts: rest }
     }),
+  addPendingApproval: (data) =>
+    set((state) => ({
+      pendingApprovals: [...state.pendingApprovals, { ...data, status: 'pending' }]
+    })),
   respondToApproval: (approvalId, approved) => {
     window.api?.chat?.respondApproval(approvalId, approved)
+    const newStatus = approved ? 'approved' as const : 'rejected' as const
     set((state) => {
+      // Update streaming parts
       const newParts = { ...state.streamingParts }
       for (const [convId, parts] of Object.entries(newParts)) {
         newParts[convId] = parts.map(p =>
           p.type === 'tool_approval' && p.approvalId === approvalId
-            ? { ...p, status: approved ? 'approved' as const : 'rejected' as const }
+            ? { ...p, status: newStatus }
             : p
         )
       }
-      return { streamingParts: newParts }
+      // Update pending approvals
+      const pendingApprovals = state.pendingApprovals.map(a =>
+        a.approvalId === approvalId ? { ...a, status: newStatus } : a
+      )
+      return { streamingParts: newParts, pendingApprovals }
     })
   },
 

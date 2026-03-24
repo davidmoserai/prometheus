@@ -20,6 +20,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
+import { ToolApprovalCard } from '@/components/ui/tool-approval-card'
 import { useAppStore, type Task, type RecurringTask } from '@/stores/app-store'
 
 const STATUS_CONFIG = {
@@ -70,9 +71,11 @@ export function TasksPage() {
     tasks,
     employees,
     recurringTasks,
+    pendingApprovals,
     updateTask,
     deleteTask,
     replyToTask,
+    respondToApproval,
     createRecurringTask,
     updateRecurringTask,
     deleteRecurringTask
@@ -578,7 +581,7 @@ export function TasksPage() {
                                 </div>
 
                                 {/* Task Thread */}
-                                {task.messages && task.messages.length > 0 && (
+                                {((task.messages && task.messages.length > 0) || (task.conversationId && pendingApprovals.some(a => a.conversationId === task.conversationId))) && (
                                   <div style={{ marginTop: '16px', marginBottom: '20px' }}>
                                     <p className="text-[12px] font-medium text-text-tertiary uppercase tracking-wider" style={{ marginBottom: '12px' }}>Activity</p>
                                     <div className="flex flex-col" style={{ gap: '8px' }}>
@@ -619,6 +622,21 @@ export function TasksPage() {
                                           </div>
                                         </div>
                                       )}
+                                      {/* Pending tool approvals for this task */}
+                                      {task.conversationId && pendingApprovals
+                                        .filter(a => a.conversationId === task.conversationId)
+                                        .map(approval => (
+                                          <ToolApprovalCard
+                                            key={approval.approvalId}
+                                            approvalId={approval.approvalId}
+                                            tool={approval.tool}
+                                            args={approval.args}
+                                            summary={approval.summary}
+                                            status={approval.status}
+                                            onRespond={respondToApproval}
+                                          />
+                                        ))
+                                      }
                                     </div>
                                   </div>
                                 )}
